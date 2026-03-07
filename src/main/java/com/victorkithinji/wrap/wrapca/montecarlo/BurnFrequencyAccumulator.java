@@ -1,0 +1,4 @@
+package com.victorkithinji.wrap.wrapca.montecarlo;
+
+public class BurnFrequencyAccumulator {
+}

@@ -4,8 +4,6 @@
 
 This document is self-contained for use in a new chat. The proposal PDF will also be available.
 
-
-
 ---
 
 
@@ -79,6 +77,8 @@ history/      → JSON run persistence
 dto/          → API request/response shapes only
 
 config/       → reads application.properties into typed beans
+
+cvintegration/  → HTTP client to CV module, mode detection boundary
 
 ```
 
@@ -262,7 +262,11 @@ Loads ERA5 wind data (initially from a local file, later from API). Interpolates
 
 Parses a CV-provided fire perimeter (GeoJSON polygon or cell coordinate list) into a `Set<Long>` of encoded cell indices (`row * gridWidth + col`). This is the initial BURNING cell set for Phase 2.
 
+**15. `cvintegration/FirePerimeterData.java`**
+    Data class first — no dependencies. Fields: String perimeterGeoJson, List<Long> confirmedBurnedCellIndices, List<Long> suppressedZoneCellIndices, Map<Long, Float> updatedMoistureValues, Instant observationTime.
 
+**16. `cvintegration/CvApiClient.java`**
+    @Service. Wraps Spring RestClient. Two methods: fetchLatestFuelState() → Optional<Path> (downloads GeoTIFF to local cache), fetchLatestFirePerimeter() → Optional<FirePerimeterData>. Depends on FirePerimeterData only.
 
 ---
 
@@ -272,7 +276,7 @@ Parses a CV-provided fire perimeter (GeoJSON polygon or cell coordinate list) in
 
 
 
-**15. `grid/GridInitialiserService.java`**
+**17. `grid/GridInitialiserService.java`**
 
 Consumes outputs of GeoTiffBandReaderService. Constructs CaGrid: assigns CellEnvironment per cell, marks NON\_COMBUSTIBLE cells (water, built areas from OSM layer). Entry point for the facade's startup sequence.
 
@@ -286,31 +290,31 @@ Consumes outputs of GeoTiffBandReaderService. Constructs CaGrid: assigns CellEnv
 
 
 
-**16. `simulation/ActiveCellFrontierTracker.java`**
+**18. `simulation/ActiveCellFrontierTracker.java`**
 
 Maintains a `HashSet<Long>` of cells that have at least one BURNING neighbour. Updated each generation — cells added when a neighbour ignites, removed when they themselves become BURNED or when all neighbours are BURNED. This is the efficiency constraint from the proposal: only frontier cells are evaluated.
 
 
 
-**17. `simulation/IgnitionProbabilityResolver.java`**
+**19. `simulation/IgnitionProbabilityResolver.java`**
 
 For one target cell, iterates its BURNING neighbours, calls RothermelRosCalculator for each, computes Pₑ per neighbour, then resolves combined ignition probability: `1 - ∏(1 - Pₑⱼ)`. Returns a double.
 
 
 
-**18. `simulation/MooreNeighbourEvaluator.java`**
+**20. `simulation/MooreNeighbourEvaluator.java`**
 
 For a given cell coordinate, returns the 8 Moore neighbours with their direction indices and distances. Handles grid boundary checks.
 
 
 
-**19. `simulation/SimulationStepResult.java`**
+**21. `simulation/SimulationStepResult.java`**
 
 Data class (Lombok `@Value`). Holds: `Set<Long> newlyBurnedCells`, `int generation`, `Instant timestamp`. One instance produced per generation step.
 
 
 
-**20. `simulation/CaSpreadEngine.java`**
+**22. `simulation/CaSpreadEngine.java`**
 
 The core engine. Per generation: iterates frontier cells via ActiveCellFrontierTracker, calls IgnitionProbabilityResolver, resolves state transitions stochastically, updates grid, updates frontier, produces SimulationStepResult. Takes CaGrid + WindField as inputs. Used by both Phase 1 (Monte Carlo) and Phase 2 (active spread).
 
@@ -324,31 +328,31 @@ The core engine. Per generation: iterates frontier cells via ActiveCellFrontierT
 
 
 
-**21. `montecarlo/IgnitionLikelihoodIndexBuilder.java`**
+**23. `montecarlo/IgnitionLikelihoodIndexBuilder.java`**
 
 Computes I(c) per cell: weighted combination of normalised NDMI, historical FIRMS fire density, OSM human activity proximity. Output is a float\[] probability weight array used for seeding. Runs once before ensemble.
 
 
 
-**22. `montecarlo/IgnitionSeedSampler.java`**
+**24. `montecarlo/IgnitionSeedSampler.java`**
 
 Samples N ignition seed cells from the grid with probability proportional to I(c). Uses Commons Math for weighted sampling. Returns `List<Long>` of encoded cell indices.
 
 
 
-**23. `montecarlo/BurnFrequencyAccumulator.java`**
+**25. `montecarlo/BurnFrequencyAccumulator.java`**
 
 Thread-safe accumulation of burn counts across N parallel runs. Uses `AtomicIntegerArray` sized `rows × cols`. Each completed run calls `increment(cellIndex)` for every cell it burned.
 
 
 
-**24. `montecarlo/MonteCarloEnsembleRunner.java`**
+**26. `montecarlo/MonteCarloEnsembleRunner.java`**
 
 Spawns N independent CaSpreadEngine instances via `ForkJoinPool`. Each run gets its own deep copy of CaGrid and a single ignition seed. On completion, aggregates into BurnFrequencyAccumulator. Key: each task is fully independent — no shared mutable state between runs.
 
 
 
-**25. `montecarlo/RiskMapAssembler.java`**
+**27. `montecarlo/RiskMapAssembler.java`**
 
 Converts BurnFrequencyAccumulator counts → normalised damage potential values per cell. Combines with smoothed I(c) to produce the dual-layer Phase 1 output.
 
@@ -362,13 +366,13 @@ Converts BurnFrequencyAccumulator counts → normalised damage potential values 
 
 
 
-**26. `correction/SuppressedZoneRegistry.java`**
+**28. `correction/SuppressedZoneRegistry.java`**
 
 Tracks cells temporarily set to NON\_COMBUSTIBLE based on suppression signatures detected in VIIRS thermal data (provided by CV module). Holds a `Map<Long, Instant>` of cell index → suppression expiry time. CaSpreadEngine checks this before evaluating any cell.
 
 
 
-**27. `correction/CvStateInjectorService.java`**
+**29. `correction/CvStateInjectorService.java`**
 
 Applies CV observation layer to a running CaGrid: forces confirmed BURNED cells, registers suppressed zones, refreshes NDMI for UNBURNED cells. Called at each satellite overpass interval.
 
@@ -382,19 +386,19 @@ Applies CV observation layer to a running CaGrid: forces confirmed BURNED cells,
 
 
 
-**28. `output/SimulationResultAssembler.java`**
+**30. `output/SimulationResultAssembler.java`**
 
 Converts CaGrid state + List<SimulationStepResult> → response DTOs. Produces compact JSON-friendly structures (flat arrays, not raw grid objects). Does not send GeoTIFF bytes over API.
 
 
 
-**29. `output/PerimeterPolygonExtractor.java`**
+**31. `output/PerimeterPolygonExtractor.java`**
 
 Traces the boundary between BURNED/BURNING and UNBURNED cells → GeoJSON polygon with timestamp. Used for Phase 2 time-stamped perimeter overlays.
 
 
 
-**30. `output/HeatmapRasterWriter.java`**
+**32. `output/HeatmapRasterWriter.java`**
 
 Writes Phase 1 risk maps to GeoTIFF for file export only. Not called during normal API responses.
 
@@ -408,19 +412,19 @@ Writes Phase 1 risk maps to GeoTIFF for file export only. Not called during norm
 
 
 
-**31. `history/RunRecord.java`**
+**33. `history/RunRecord.java`**
 
 Lombok `@Value`. Fields: `String runId, SimulationPhase phase, Instant startedAt, Instant completedAt, Map<String,Object> parameters, String resultFilePath`.
 
 
 
-**32. `history/RunLogWriterService.java`**
+**34. `history/RunLogWriterService.java`**
 
 On simulation completion, serialises RunRecord to `data/runs/{timestamp}\_{phase}.json` using Jackson ObjectMapper. No database — one file per run.
 
 
 
-**33. `history/RunLogReaderService.java`**
+**35. `history/RunLogReaderService.java`**
 
 Lists `data/runs/` directory, deserialises RunRecord from each file. Returns `List<RunRecord>` sorted by date. Called by the facade on startup.
 
@@ -434,37 +438,37 @@ Lists `data/runs/` directory, deserialises RunRecord from each file. Returns `Li
 
 
 
-**34. `dto/request/PhaseOneRunRequest.java`**
+**36. `dto/request/PhaseOneRunRequest.java`**
 
 Fields: nothing required — Phase 1 uses the currently loaded grid. Optional override fields for wind speed/direction if the user wants to test a scenario.
 
 
 
-**35. `dto/request/PhaseTwoRunRequest.java`**
+**37. `dto/request/PhaseTwoRunRequest.java`**
 
 Fields: `boolean cvDisabled`, `boolean manualIgnition`, `String manualIgnitionPolygonGeoJson` (nullable), `int simulationHours`.
 
 
 
-**36. `dto/request/CvCorrectionRequest.java`**
+**38. `dto/request/CvCorrectionRequest.java`**
 
 Fields: `String observedPerimeterGeoJson`, `List<String> suppressedZoneCellIds`, `Map<String,Float> updatedMoistureValues`.
 
 
 
-**37. `dto/response/SessionStatusResponse.java`**
+**39. `dto/response/SessionStatusResponse.java`**
 
 Fields: `SimulationMode mode` (PRE\_FIRE / ACTIVE\_FIRE), grid summary (rows, cols, cellSize, bounds), `List<RunSummaryResponse> pastRuns`.
 
 
 
-**38. `dto/response/PhaseOneResultResponse.java`**
+**40. `dto/response/PhaseOneResultResponse.java`**
 
 Fields: `String runId`, `float\[] damagePotentialValues`, `float\[] ignitionProbabilityValues`, `int rows`, `int cols`.
 
 
 
-**39. `dto/response/PhaseTwoResultResponse.java`**
+**41. `dto/response/PhaseTwoResultResponse.java`**
 
 Fields: `String runId`, `List<PerimeterSnapshot> perimetersByTimestamp` where each snapshot holds a GeoJSON polygon string and an ISO timestamp.
 
@@ -478,25 +482,25 @@ Fields: `String runId`, `List<PerimeterSnapshot> perimetersByTimestamp` where ea
 
 
 
-**40. `facade/WrapSessionFacade.java`**
+**42. `facade/WrapSessionFacade.java`**
 
 `@Service`. Startup sequence: checks cache → loads GeoTIFF → initialises grid → checks for fire perimeter from CV → sets mode. Exposes methods called by controllers. Coordinates between all services.
 
 
 
-**41. `api/GridController.java`**
+**43. `api/GridController.java`**
 
 `@RestController`. Single endpoint: `GET /api/session/status` → calls facade → returns SessionStatusResponse.
 
 
 
-**42. `api/SimulationController.java`**
+**44. `api/SimulationController.java`**
 
 `@RestController`. Endpoints: `POST /api/simulation/phase-one/run`, `POST /api/simulation/phase-two/run`, `POST /api/simulation/phase-two/correct`.
 
 
 
-**43. `api/RunHistoryController.java`**
+**45. `api/RunHistoryController.java`**
 
 `@RestController`. Endpoints: `GET /api/runs`, `GET /api/runs/{runId}`.
 

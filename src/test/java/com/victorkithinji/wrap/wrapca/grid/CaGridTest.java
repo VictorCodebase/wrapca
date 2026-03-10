@@ -24,7 +24,7 @@ class CaGridTest {
 
     private static CellEnvironment defaultEnv() {
         return new CellEnvironment(
-                0.60f, 0.35f, 0.0f, 0.0f, VegetationType.SHRUBLAND
+                0.60f, 0.35f, 0.0f, 0.0f, VegetationTypeEnum.SHRUBLAND
         );
     }
 
@@ -56,7 +56,7 @@ class CaGridTest {
             CaGrid grid = freshGrid();
             for (int r = 0; r < ROWS; r++)
                 for (int c = 0; c < COLS; c++)
-                    assertEquals(CellState.UNBURNED, grid.getState(r, c),
+                    assertEquals(CellStateEnum.UNBURNED, grid.getState(r, c),
                             "Cell [" + r + "][" + c + "] should be UNBURNED on a zero-init grid");
         }
 
@@ -176,29 +176,29 @@ class CaGridTest {
 
         @Test
         void setState_thenGetState_returnsNewState() {
-            grid.setState(2, 3, CellState.BURNING);
-            assertEquals(CellState.BURNING, grid.getState(2, 3));
+            grid.setState(2, 3, CellStateEnum.BURNING);
+            assertEquals(CellStateEnum.BURNING, grid.getState(2, 3));
         }
 
         @Test
         void setState_doesNotAffectOtherCells() {
-            grid.setState(1, 1, CellState.BURNED);
+            grid.setState(1, 1, CellStateEnum.BURNED);
             // Adjacent cell must be untouched
-            assertEquals(CellState.UNBURNED, grid.getState(1, 2));
-            assertEquals(CellState.UNBURNED, grid.getState(0, 1));
+            assertEquals(CellStateEnum.UNBURNED, grid.getState(1, 2));
+            assertEquals(CellStateEnum.UNBURNED, grid.getState(0, 1));
         }
 
         @Test
         void setState_nonCombustible_persists() {
-            grid.setState(0, 0, CellState.NON_COMBUSTIBLE);
-            assertEquals(CellState.NON_COMBUSTIBLE, grid.getState(0, 0));
+            grid.setState(0, 0, CellStateEnum.NON_COMBUSTIBLE);
+            assertEquals(CellStateEnum.NON_COMBUSTIBLE, grid.getState(0, 0));
         }
 
         @Test
         void rawOrdinalAndGetState_areConsistent() {
-            grid.setState(3, 2, CellState.BURNING);
+            grid.setState(3, 2, CellStateEnum.BURNING);
             int rawOrdinal = grid.states[3][2];
-            assertEquals(CellState.BURNING, CellState.values()[rawOrdinal]);
+            assertEquals(CellStateEnum.BURNING, CellStateEnum.values()[rawOrdinal]);
         }
     }
 
@@ -263,8 +263,8 @@ class CaGridTest {
             CaGrid copy = original.deepCopy();
 
             // Mutate the copy — original must be unaffected
-            copy.setState(0, 0, CellState.BURNING);
-            assertEquals(CellState.UNBURNED, original.getState(0, 0),
+            copy.setState(0, 0, CellStateEnum.BURNING);
+            assertEquals(CellStateEnum.UNBURNED, original.getState(0, 0),
                     "Mutating the copy must not change the original (Monte Carlo isolation)");
         }
 
@@ -273,20 +273,20 @@ class CaGridTest {
             CaGrid original = freshGrid();
             CaGrid copy = original.deepCopy();
 
-            original.setState(2, 2, CellState.BURNED);
-            assertEquals(CellState.UNBURNED, copy.getState(2, 2),
+            original.setState(2, 2, CellStateEnum.BURNED);
+            assertEquals(CellStateEnum.UNBURNED, copy.getState(2, 2),
                     "Mutating the original must not change the copy");
         }
 
         @Test
         void deepCopy_preservesExistingState() {
             CaGrid original = freshGrid();
-            original.setState(1, 1, CellState.BURNING);
-            original.setState(3, 3, CellState.NON_COMBUSTIBLE);
+            original.setState(1, 1, CellStateEnum.BURNING);
+            original.setState(3, 3, CellStateEnum.NON_COMBUSTIBLE);
 
             CaGrid copy = original.deepCopy();
-            assertEquals(CellState.BURNING,        copy.getState(1, 1));
-            assertEquals(CellState.NON_COMBUSTIBLE, copy.getState(3, 3));
+            assertEquals(CellStateEnum.BURNING,        copy.getState(1, 1));
+            assertEquals(CellStateEnum.NON_COMBUSTIBLE, copy.getState(3, 3));
         }
 
         @Test

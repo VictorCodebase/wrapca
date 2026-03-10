@@ -1,11 +1,9 @@
 package com.victorkithinji.wrap.wrapca.rothermel;
 
-import com.victorkithinji.wrap.wrapca.grid.VegetationType;
+import com.victorkithinji.wrap.wrapca.grid.VegetationTypeEnum;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -33,7 +31,7 @@ class RothermelPhysicsTest {
         @Test
         @DisplayName("Resolves all VegetationType values without throwing")
         void allVegetationTypesResolve() {
-            for (VegetationType type : VegetationType.values()) {
+            for (VegetationTypeEnum type : VegetationTypeEnum.values()) {
                 assertThatCode(() -> FuelModelResolver.resolve(type))
                         .as("resolve(%s) should not throw", type)
                         .doesNotThrowAnyException();
@@ -43,7 +41,7 @@ class RothermelPhysicsTest {
         @Test
         @DisplayName("AFROMONTANE_FOREST has positive fuel load and heat content")
         void afromontaneForestHasPositiveFuelParameters() {
-            FuelModel m = FuelModelResolver.resolve(VegetationType.AFROMONTANE_FOREST);
+            FuelModel m = FuelModelResolver.resolve(VegetationTypeEnum.AFROMONTANE_FOREST);
             assertThat(m.ovendryFuelLoad()).isPositive();
             assertThat(m.heatContent()).isPositive();
             assertThat(m.savRatio()).isPositive();
@@ -52,21 +50,21 @@ class RothermelPhysicsTest {
         @Test
         @DisplayName("WATER has zero fuel load — non-combustible sentinel")
         void waterHasZeroFuelLoad() {
-            FuelModel m = FuelModelResolver.resolve(VegetationType.WATER);
+            FuelModel m = FuelModelResolver.resolve(VegetationTypeEnum.WATER);
             assertThat(m.ovendryFuelLoad()).isZero();
         }
 
         @Test
         @DisplayName("BUILT has zero fuel load — non-combustible sentinel")
         void builtHasZeroFuelLoad() {
-            FuelModel m = FuelModelResolver.resolve(VegetationType.BUILT);
+            FuelModel m = FuelModelResolver.resolve(VegetationTypeEnum.BUILT);
             assertThat(m.ovendryFuelLoad()).isZero();
         }
 
         @Test
         @DisplayName("Moisture of extinction is in physically meaningful range (0, 1)")
         void moistureOfExtinctionInRange() {
-            for (VegetationType type : VegetationType.values()) {
+            for (VegetationTypeEnum type : VegetationTypeEnum.values()) {
                 FuelModel m = FuelModelResolver.resolve(type);
                 if (m.ovendryFuelLoad() > 0) {
                     assertThat(m.moistureOfExtinction())
@@ -245,8 +243,8 @@ class RothermelPhysicsTest {
     @DisplayName("RothermelRosCalculator — full ROS")
     class RosIntegrationTests {
 
-        private final FuelModel grassFuel = FuelModelResolver.resolve(VegetationType.MONTANE_GRASSLAND);
-        private final FuelModel forestFuel = FuelModelResolver.resolve(VegetationType.AFROMONTANE_FOREST);
+        private final FuelModel grassFuel = FuelModelResolver.resolve(VegetationTypeEnum.MONTANE_GRASSLAND);
+        private final FuelModel forestFuel = FuelModelResolver.resolve(VegetationTypeEnum.AFROMONTANE_FOREST);
 
         @Test
         @DisplayName("ROS = 0 when fuel moisture ≥ moisture of extinction")
@@ -309,7 +307,7 @@ class RothermelPhysicsTest {
             double[] winds     = {0.0, 2.0, 8.0};
             double[] slopes    = {Math.toRadians(-20), 0.0, Math.toRadians(20)};
 
-            for (VegetationType type : VegetationType.values()) {
+            for (VegetationTypeEnum type : VegetationTypeEnum.values()) {
                 FuelModel fuel = FuelModelResolver.resolve(type);
                 for (double mf : moistures) {
                     for (double w : winds) {

@@ -72,10 +72,10 @@ public class CellEnvironment {
      * the East Africa fuel model table by
      * {@code rothermel.FuelModelResolver}.
      *
-     * <p>Cells carrying {@link VegetationType#WATER} or
-     * {@link VegetationType#BUILT} will be set to
-     * {@link CellState#NON_COMBUSTIBLE} at grid initialisation and this
+     * <p>Cells carrying {@link VegetationTypeEnum#WATER} or
+     * {@link VegetationTypeEnum#BUILT} will be set to
+     * {@link CellStateEnum#NON_COMBUSTIBLE} at grid initialisation and this
      * field is therefore irrelevant for those cells at runtime.
      */
-    VegetationType vegetationType;
+    VegetationTypeEnum vegetationType;
 }

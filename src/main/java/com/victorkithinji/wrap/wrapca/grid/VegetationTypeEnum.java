@@ -13,9 +13,9 @@ package com.victorkithinji.wrap.wrapca.grid;
  *
  * <p>{@code WATER} and {@code BUILT} are non-combustible by definition;
  * cells carrying these types are initialised as
- * {@link CellState#NON_COMBUSTIBLE} and are never evaluated by the engine.
+ * {@link CellStateEnum#NON_COMBUSTIBLE} and are never evaluated by the engine.
  */
-public enum VegetationType {
+public enum VegetationTypeEnum {
 
     /**
      * Dense highland forest: Afromontane evergreen canopy typical of
@@ -46,7 +46,7 @@ public enum VegetationType {
     /**
      * Open water (lakes, rivers, wetlands).
      * Non-combustible — cells of this type are set to
-     * {@link CellState#NON_COMBUSTIBLE} at grid initialisation.
+     * {@link CellStateEnum#NON_COMBUSTIBLE} at grid initialisation.
      */
     WATER,
 
@@ -54,7 +54,7 @@ public enum VegetationType {
      * Built-up / urban / infrastructure land cover (roads, buildings,
      * settlements derived from OSM).
      * Non-combustible — cells of this type are set to
-     * {@link CellState#NON_COMBUSTIBLE} at grid initialisation.
+     * {@link CellStateEnum#NON_COMBUSTIBLE} at grid initialisation.
      */
     BUILT
 }

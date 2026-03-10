@@ -2,7 +2,7 @@ package com.victorkithinji.wrap.wrapca.rothermel;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.victorkithinji.wrap.wrapca.grid.VegetationType;
+import com.victorkithinji.wrap.wrapca.grid.VegetationTypeEnum;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -10,11 +10,11 @@ import java.util.EnumMap;
 import java.util.Map;
 
 /**
- * Maps {@link VegetationType} → {@link FuelModel}.
+ * Maps {@link VegetationTypeEnum} → {@link FuelModel}.
  *
  * <p>The lookup table is loaded once from
  * {@code resources/fuelmodels/east_africa_fuel_models.json} at class-initialisation
- * time.  After that every call to {@link #resolve(VegetationType)} is a single
+ * time.  After that every call to {@link #resolve(VegetationTypeEnum)} is a single
  * {@code EnumMap} lookup — no I/O, no Spring context required.
  *
  * <p>If the JSON cannot be read the static initialiser throws
@@ -27,7 +27,7 @@ public final class FuelModelResolver {
     // Static lookup table — built once, shared across all callers
     // -------------------------------------------------------------------------
 
-    private static final Map<VegetationType, FuelModel> TABLE;
+    private static final Map<VegetationTypeEnum, FuelModel> TABLE;
 
     static {
         TABLE = loadFromJson();
@@ -48,7 +48,7 @@ public final class FuelModelResolver {
      * @throws IllegalArgumentException if the type has no entry in the table
      *         (indicates a JSON / enum mismatch that must be fixed)
      */
-    public static FuelModel resolve(VegetationType type) {
+    public static FuelModel resolve(VegetationTypeEnum type) {
         FuelModel model = TABLE.get(type);
         if (model == null) {
             throw new IllegalArgumentException(
@@ -62,7 +62,7 @@ public final class FuelModelResolver {
     // JSON loading
     // -------------------------------------------------------------------------
 
-    private static Map<VegetationType, FuelModel> loadFromJson() {
+    private static Map<VegetationTypeEnum, FuelModel> loadFromJson() {
         ObjectMapper mapper = new ObjectMapper();
         String resourcePath = "/fuelmodels/east_africa_fuel_models.json";
 
@@ -79,9 +79,9 @@ public final class FuelModelResolver {
                         "east_africa_fuel_models.json is missing top-level 'fuelModels' key");
             }
 
-            Map<VegetationType, FuelModel> table = new EnumMap<>(VegetationType.class);
+            Map<VegetationTypeEnum, FuelModel> table = new EnumMap<>(VegetationTypeEnum.class);
 
-            for (VegetationType vegType : VegetationType.values()) {
+            for (VegetationTypeEnum vegType : VegetationTypeEnum.values()) {
                 JsonNode node = fuelModels.get(vegType.name());
                 if (node == null) {
                     throw new IllegalStateException(

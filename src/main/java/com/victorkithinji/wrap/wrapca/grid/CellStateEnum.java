@@ -11,7 +11,7 @@ package com.victorkithinji.wrap.wrapca.grid;
  * <p>Ordinal values are used as indices into {@code int[][]} state arrays
  * inside {@link CaGrid} for performance — do not reorder these constants.
  */
-public enum CellState {
+public enum CellStateEnum {
 
     /**
      * Vegetated cell that has not yet ignited. Eligible to receive fire from

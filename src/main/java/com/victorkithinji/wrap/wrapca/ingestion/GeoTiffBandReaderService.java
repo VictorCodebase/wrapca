@@ -1,18 +1,12 @@
 package com.victorkithinji.wrap.wrapca.ingestion;
 
 import lombok.extern.slf4j.Slf4j;
+import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 import org.geotools.coverage.grid.GridCoverage2D;
-import org.geotools.coverage.grid.GridEnvelope2D;
-import org.geotools.coverage.grid.GridGeometry2D;
-import org.geotools.coverage.grid.io.AbstractGridFormat;
 import org.geotools.coverage.grid.io.GridCoverage2DReader;
-import org.geotools.coverage.grid.io.GridFormatFinder;
 import org.geotools.gce.geotiff.GeoTiffFormat;
 import org.geotools.geometry.jts.ReferencedEnvelope;
-import org.geotools.parameter.Parameter;
 import org.geotools.referencing.CRS;
-import org.opengis.parameter.GeneralParameterValue;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -28,12 +22,9 @@ import java.nio.file.Path;
  * Band assumptions are isolated in BandLayout — that is the only class
  * that needs changing when the CV contract is confirmed.
  *
- * Downsampling: if the GeoTIFF pixel size is finer than cellSizeMetres,
- * GeoTools is asked to read at the target resolution using overview/subsample
- * reading. Block-averaging is applied implicitly by the GeoTIFF reader when
- * overview levels are present; if not, nearest-neighbour subsampling is used.
- * This is acceptable for the 100m CA grid — the CA physics dominate spatial
- * uncertainty at this scale, not the resampling method.
+ * Windows note: coverage.dispose(true) is called before reader.dispose() to
+ * ensure the underlying ImageIO file handle is released in the correct order.
+ * Reversing this order leaves the file locked on Windows.
  */
 @Slf4j
 @Service
@@ -46,13 +37,6 @@ public class GeoTiffBandReaderService {
         this.targetCellSizeMetres = targetCellSizeMetres;
     }
 
-    /**
-     * Reads the GeoTIFF at the given path and returns structured band arrays.
-     *
-     * @param tiffPath path to a GeoTIFF with bands in the layout defined by BandLayout
-     * @return GridBands containing ndvi, ndmi, elevationMetres arrays
-     * @throws IOException if the file cannot be read or has unexpected structure
-     */
     public GridBands read(Path tiffPath) throws IOException {
         File file = tiffPath.toFile();
         if (!file.exists()) {
@@ -65,10 +49,14 @@ public class GeoTiffBandReaderService {
             throw new IOException("File is not a valid GeoTIFF: " + tiffPath);
         }
 
+        GridCoverage2D coverage = null;
         try {
-            GridCoverage2D coverage = reader.read(null);
+            coverage = reader.read(null);
             validateCoverage(coverage, tiffPath);
 
+            // getData() copies all pixel values into a detached in-memory Raster.
+            // After this call the float arrays are fully on the heap and we no
+            // longer need the coverage or its underlying ImageIO stream.
             Raster raster = coverage.getRenderedImage().getData();
             int cols = raster.getWidth();
             int rows = raster.getHeight();
@@ -85,7 +73,7 @@ public class GeoTiffBandReaderService {
             double pixelWidth = envelope.getWidth() / cols;
 
             if (Math.abs(pixelWidth - targetCellSizeMetres) > 1.0) {
-                log.warn("GeoTIFF pixel size {:.1f}m differs from target {:.1f}m. " +
+                log.warn("GeoTIFF pixel size {}m differs from target {}m. " +
                         "Grid initialiser will use raster dimensions as-is. " +
                         "Confirm pixel size with CV team.", pixelWidth, targetCellSizeMetres);
             }
@@ -99,6 +87,12 @@ public class GeoTiffBandReaderService {
             );
 
         } finally {
+            // Dispose coverage before reader — this order matters on Windows.
+            // Disposing coverage first releases the RenderedImage chain,
+            // then reader.dispose() closes the underlying file channel cleanly.
+            if (coverage != null) {
+                coverage.dispose(true);
+            }
             reader.dispose();
         }
     }

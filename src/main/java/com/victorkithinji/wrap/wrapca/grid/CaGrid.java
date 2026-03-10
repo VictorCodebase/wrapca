@@ -14,7 +14,7 @@ package com.victorkithinji.wrap.wrapca.grid;
  * GeoTIFF raster conventions.
  *
  * <h2>Cell encoding</h2>
- * Cell states are stored as {@code int} ordinals of {@link CellState} rather
+ * Cell states are stored as {@code int} ordinals of {@link CellStateEnum} rather
  * than enum references to avoid object-array overhead on large grids.
  * Read a state with {@code CellState.values()[states[r][c]]} and write it
  * with {@code states[r][c] = CellState.BURNING.ordinal()}.
@@ -33,7 +33,7 @@ public class CaGrid {
 
     /**
      * Cell state array, indexed {@code [row][col]}.
-     * Values are {@link CellState} ordinals — use
+     * Values are {@link CellStateEnum} ordinals — use
      * {@code CellState.values()[states[r][c]]} to obtain the enum constant.
      */
     public final int[][] states;
@@ -150,14 +150,14 @@ public class CaGrid {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns the {@link CellState} of the cell at (row, col).
+     * Returns the {@link CellStateEnum} of the cell at (row, col).
      *
      * @param row row coordinate
      * @param col column coordinate
      * @return current cell state
      */
-    public CellState getState(int row, int col) {
-        return CellState.values()[states[row][col]];
+    public CellStateEnum getState(int row, int col) {
+        return CellStateEnum.values()[states[row][col]];
     }
 
     /**
@@ -167,7 +167,7 @@ public class CaGrid {
      * @param col   column coordinate
      * @param state new state
      */
-    public void setState(int row, int col, CellState state) {
+    public void setState(int row, int col, CellStateEnum state) {
         states[row][col] = state.ordinal();
     }
 

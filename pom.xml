@@ -25,6 +25,11 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.opengis</groupId>
+            <artifactId>geoapi</artifactId>
+            <version>3.0.2</version>
+        </dependency>
 
         <!-- Spring Web (REST controllers) -->
         <dependency>

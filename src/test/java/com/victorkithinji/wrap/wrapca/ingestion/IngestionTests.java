@@ -1,6 +1,8 @@
 package com.victorkithinji.wrap.wrapca.ingestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.victorkithinji.wrap.wrapca.grid.VegetationTypeEnum;
+import com.victorkithinji.wrap.wrapca.ingestion.*;
 import com.victorkithinji.wrap.wrapca.util.SyntheticGeoTiffGenerator;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -18,6 +20,8 @@ import static org.assertj.core.api.Assertions.*;
  * Each test is self-contained and uses TempDir — no shared state.
  */
 class IngestionTests {
+
+    // ─── IngestionCacheService ───────────────────────────────────────────────
 
     @Nested
     class IngestionCacheServiceTest {
@@ -105,41 +109,50 @@ class IngestionTests {
         }
 
         @Test
-        void readReturnsCorrectDimensions() throws IOException {
+        void readReturnsNativeResolutionDimensions() throws IOException {
             GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
             GridBands bands = svc.read(syntheticTiff);
 
-            assertThat(bands.getRows()).isEqualTo(200);
-            assertThat(bands.getCols()).isEqualTo(200);
+            // Native resolution is 10m — 20km area = 2000x2000 cells
+            assertThat(bands.getRows()).isEqualTo(2000);
+            assertThat(bands.getCols()).isEqualTo(2000);
         }
 
         @Test
-        void ndviArrayHasExpectedForestValues() throws IOException {
+        void nativePixelSizeIsReported() throws IOException {
             GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
             GridBands bands = svc.read(syntheticTiff);
 
-            // Centre of grid should be Afromontane forest (~0.65)
-            float centrNdvi = bands.getNdvi()[100][100];
-            assertThat(centrNdvi).isBetween(0.55f, 0.75f);
+            assertThat(bands.getCellSizeMetres()).isCloseTo(10.0, within(0.5));
         }
 
         @Test
-        void ndviArrayHasGrasslandPatch() throws IOException {
+        void ndviForestValuesInCentre() throws IOException {
             GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
             GridBands bands = svc.read(syntheticTiff);
 
-            // SW grassland patch (rows 120-160, cols 20-60)
-            float patchNdvi = bands.getNdvi()[140][40];
+            // Centre of grid: Afromontane forest (~0.65)
+            float centreNdvi = bands.getNdvi()[1000][1000];
+            assertThat(centreNdvi).isBetween(0.55f, 0.75f);
+        }
+
+        @Test
+        void ndviGrasslandPatchPresent() throws IOException {
+            GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
+            GridBands bands = svc.read(syntheticTiff);
+
+            // SW grassland patch (rows 1200-1600, cols 200-600 at 10m)
+            float patchNdvi = bands.getNdvi()[1400][400];
             assertThat(patchNdvi).isBetween(0.18f, 0.35f);
         }
 
         @Test
-        void ndviArrayHasNearZeroWaterPatch() throws IOException {
+        void ndviWaterPatchPresent() throws IOException {
             GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
             GridBands bands = svc.read(syntheticTiff);
 
-            // NE bare/water patch (rows 0-20, cols 180-200)
-            float waterNdvi = bands.getNdvi()[5][190];
+            // NE water patch (rows 0-200, cols 1800-2000 at 10m)
+            float waterNdvi = bands.getNdvi()[50][1900];
             assertThat(waterNdvi).isBetween(-0.05f, 0.1f);
         }
 
@@ -148,17 +161,29 @@ class IngestionTests {
             GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
             GridBands bands = svc.read(syntheticTiff);
 
-            float westElev = bands.getElevationMetres()[100][0];
-            float eastElev = bands.getElevationMetres()[100][199];
+            float westElev = bands.getElevationMetres()[1000][0];
+            float eastElev = bands.getElevationMetres()[1000][1999];
             assertThat(eastElev).isGreaterThan(westElev);
         }
 
         @Test
-        void cellSizeReportedCorrectly() throws IOException {
+        void slopeBandIsPresent() throws IOException {
             GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
             GridBands bands = svc.read(syntheticTiff);
 
-            assertThat(bands.getCellSizeMetres()).isCloseTo(100.0, within(1.0));
+            // Slope values should be non-negative degrees
+            float slope = bands.getSlopeDegrees()[1000][1000];
+            assertThat(slope).isGreaterThanOrEqualTo(0f);
+        }
+
+        @Test
+        void aspectBandIsPresent() throws IOException {
+            GeoTiffBandReaderService svc = new GeoTiffBandReaderService(100.0);
+            GridBands bands = svc.read(syntheticTiff);
+
+            // Aspect is uniform westerly (~4.71 radians = 270 degrees)
+            float aspect = bands.getAspectRadians()[1000][1000];
+            assertThat(aspect).isCloseTo((float)(Math.PI * 1.5), within(0.1f));
         }
 
         @Test
@@ -266,4 +291,201 @@ class IngestionTests {
                     .hasMessageContaining("Unsupported GeoJSON type");
         }
     }
+
+    // ─── EsaBandLayout ────────────────────────────────────────────────────────
+
+    @Nested
+    class EsaBandLayoutTest {
+
+        @Test
+        void treeCoversResolvesToForest() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_TREE_COVER))
+                    .isEqualTo(VegetationTypeEnum.AFROMONTANE_FOREST);
+        }
+
+        @Test
+        void shrublandResolvesToShrubland() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_SHRUBLAND))
+                    .isEqualTo(VegetationTypeEnum.SHRUBLAND);
+        }
+
+        @Test
+        void grasslandResolvesToGrassland() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_GRASSLAND))
+                    .isEqualTo(VegetationTypeEnum.GRASSLAND);
+        }
+
+        @Test
+        void croplandResolvesToCropland() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_CROPLAND))
+                    .isEqualTo(VegetationTypeEnum.CROPLAND);
+        }
+
+        @Test
+        void builtUpResolvesToBuilt() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_BUILT_UP))
+                    .isEqualTo(VegetationTypeEnum.BUILT);
+        }
+
+        @Test
+        void permanentWaterResolvesToWater() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_PERMANENT_WATER))
+                    .isEqualTo(VegetationTypeEnum.WATER);
+        }
+
+        @Test
+        void herbaceousWetlandResolvesToWater() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_HERBACEOUS_WETLAND))
+                    .isEqualTo(VegetationTypeEnum.WATER);
+        }
+
+        @Test
+        void unrecognisedCodeFallsBackToBareSoil() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(999))
+                    .isEqualTo(VegetationTypeEnum.BARE_SOIL);
+        }
+
+        @Test
+        void safeOutOfAreaCodesFallBackToBareSoil() {
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_SNOW_ICE))
+                    .isEqualTo(VegetationTypeEnum.BARE_SOIL);
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_MANGROVES))
+                    .isEqualTo(VegetationTypeEnum.BARE_SOIL);
+            assertThat(EsaBandLayout.toVegetationTypeEnum(EsaBandLayout.CODE_MOSS_LICHEN))
+                    .isEqualTo(VegetationTypeEnum.BARE_SOIL);
+        }
+    }
+
+    // ─── IngestionCacheService (ESA and road additions) ───────────────────────
+
+    @Nested
+    class IngestionCacheServiceEsaRoadTest {
+
+        @Test
+        void esaCacheMiss_returnsEmpty(@TempDir Path tempDir) {
+            IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+            assertThat(svc.getCachedEsaLayer()).isEmpty();
+        }
+
+        @Test
+        void storeAndRetrieveEsa(@TempDir Path tempDir) throws IOException {
+            IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+            svc.storeEsaLayer("fake-esa-tiff".getBytes());
+            assertThat(svc.getCachedEsaLayer()).isPresent();
+        }
+
+        @Test
+        void roadCacheMiss_returnsEmpty(@TempDir Path tempDir) {
+            IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+            assertThat(svc.getCachedRoadLayer()).isEmpty();
+        }
+
+        @Test
+        void storeAndRetrieveRoads(@TempDir Path tempDir) throws IOException {
+            IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+            svc.storeRoadLayer("{\"type\":\"FeatureCollection\",\"features\":[]}");
+            assertThat(svc.getCachedRoadLayer()).isPresent();
+        }
+
+        @Test
+        void esaAndRoadCachesDoNotConflict(@TempDir Path tempDir) throws IOException {
+            IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+            svc.storeEsaLayer("esa-bytes".getBytes());
+            // Road cache should still be empty
+            assertThat(svc.getCachedRoadLayer()).isEmpty();
+        }
+    }
+
+    // ─── OsmRoadLoaderService ─────────────────────────────────────────────────
+
+    @Nested
+    class OsmRoadLoaderServiceTest {
+
+        private static final String TRACK_FEATURE = """
+                {
+                  "type": "FeatureCollection",
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "properties": { "highway": "track" },
+                      "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[260000.0, 9860000.0], [260100.0, 9860100.0], [260200.0, 9860050.0]]
+                      }
+                    }
+                  ]
+                }
+                """;
+
+        private static final String MIXED_HIGHWAY_FEATURES = """
+                {
+                  "type": "FeatureCollection",
+                  "features": [
+                    {
+                      "type": "Feature",
+                      "properties": { "highway": "track" },
+                      "geometry": { "type": "LineString",
+                        "coordinates": [[0.0, 0.0], [100.0, 0.0]] }
+                    },
+                    {
+                      "type": "Feature",
+                      "properties": { "highway": "motorway" },
+                      "geometry": { "type": "LineString",
+                        "coordinates": [[200.0, 0.0], [300.0, 0.0]] }
+                    }
+                  ]
+                }
+                """;
+
+        @Test
+        void missingFile_returnsEmptyRoadLayer(@TempDir Path tempDir) {
+            OsmRoadLoaderService svc = new OsmRoadLoaderService(
+                    tempDir.resolve("nonexistent.geojson").toString(),
+                    new ObjectMapper());
+            RoadLayer layer = svc.load();
+            assertThat(layer.isEmpty()).isTrue();
+        }
+
+        @Test
+        void validFile_parsesSegments(@TempDir Path tempDir) throws IOException {
+            Path file = tempDir.resolve("roads.geojson");
+            Files.writeString(file, TRACK_FEATURE);
+
+            OsmRoadLoaderService svc = new OsmRoadLoaderService(
+                    file.toString(), new ObjectMapper());
+            RoadLayer layer = svc.load();
+
+            assertThat(layer.isEmpty()).isFalse();
+            assertThat(layer.getSegments()).hasSize(1);
+            assertThat(layer.getSegments().get(0)).hasNumberOfRows(3); // 3 vertices
+        }
+
+        @Test
+        void nonAcceptedHighwayTags_areFiltered(@TempDir Path tempDir) throws IOException {
+            Path file = tempDir.resolve("roads.geojson");
+            Files.writeString(file, MIXED_HIGHWAY_FEATURES);
+
+            OsmRoadLoaderService svc = new OsmRoadLoaderService(
+                    file.toString(), new ObjectMapper());
+            RoadLayer layer = svc.load();
+
+            // Only "track" accepted; "motorway" filtered out
+            assertThat(layer.getSegments()).hasSize(1);
+        }
+
+        @Test
+        void coordinatesAreReadCorrectly(@TempDir Path tempDir) throws IOException {
+            Path file = tempDir.resolve("roads.geojson");
+            Files.writeString(file, TRACK_FEATURE);
+
+            OsmRoadLoaderService svc = new OsmRoadLoaderService(
+                    file.toString(), new ObjectMapper());
+            RoadLayer layer = svc.load();
+
+            double[][] segment = layer.getSegments().get(0);
+            assertThat(segment[0][0]).isCloseTo(260000.0, within(0.1));
+            assertThat(segment[0][1]).isCloseTo(9860000.0, within(0.1));
+        }
+    }
+
 }

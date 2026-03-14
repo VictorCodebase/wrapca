@@ -19,8 +19,6 @@ import java.util.Optional;
  * Cache filename convention: cv_fuel_state_YYYY-MM-DD.tif
  * This convention should be confirmed with the CV team — it is the only
  * coupling point between this service and their output naming.
- *
- * TODO: Ensure that this is updated to the finally agreed upon naming convenction
  */
 @Slf4j
 @Service
@@ -29,6 +27,11 @@ public class IngestionCacheService {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final String CACHE_FILENAME_PREFIX = "cv_fuel_state_";
     private static final String CACHE_FILENAME_SUFFIX = ".tif";
+
+    // ESA and road caches are existence-only — these files are static products
+    // that do not change between runs and have no expiry date.
+    private static final String ESA_CACHE_FILENAME  = "esa_worldcover.tif";
+    private static final String ROAD_CACHE_FILENAME = "osm_roads.geojson";
 
     private final Path cacheDirectory;
 
@@ -89,6 +92,70 @@ public class IngestionCacheService {
     public Path expectedPathForToday() {
         ensureCacheDirectoryExists();
         return cacheDirectory.resolve(buildFilename(LocalDate.now()));
+    }
+
+    // ─── ESA WorldCover cache (existence-only, never expires) ───────────────────
+
+    /**
+     * Returns the cached ESA WorldCover GeoTIFF if it exists, otherwise empty.
+     * The ESA file is a static product — once cached it is never re-fetched.
+     */
+    public Optional<Path> getCachedEsaLayer() {
+        ensureCacheDirectoryExists();
+        Path candidate = cacheDirectory.resolve(ESA_CACHE_FILENAME);
+        if (Files.exists(candidate)) {
+            log.info("ESA cache hit: {}", candidate);
+            return Optional.of(candidate);
+        }
+        log.info("ESA cache miss: no file at {}", candidate);
+        return Optional.empty();
+    }
+
+    /**
+     * Stores ESA WorldCover GeoTIFF bytes to the cache and returns the written path.
+     *
+     * @param bytes raw GeoTIFF bytes
+     * @return path of the written cache file
+     * @throws IOException if the write fails
+     */
+    public Path storeEsaLayer(byte[] bytes) throws IOException {
+        ensureCacheDirectoryExists();
+        Path target = cacheDirectory.resolve(ESA_CACHE_FILENAME);
+        Files.write(target, bytes);
+        log.info("Stored ESA WorldCover GeoTIFF: {} bytes → {}", bytes.length, target);
+        return target;
+    }
+
+    // ─── OSM road cache (existence-only, never expires) ──────────────────────
+
+    /**
+     * Returns the cached OSM road GeoJSON path if it exists, otherwise empty.
+     * Road geometry is a static product — once cached it is never re-fetched.
+     */
+    public Optional<Path> getCachedRoadLayer() {
+        ensureCacheDirectoryExists();
+        Path candidate = cacheDirectory.resolve(ROAD_CACHE_FILENAME);
+        if (Files.exists(candidate)) {
+            log.info("Road cache hit: {}", candidate);
+            return Optional.of(candidate);
+        }
+        log.info("Road cache miss: no file at {}", candidate);
+        return Optional.empty();
+    }
+
+    /**
+     * Stores OSM road GeoJSON to the cache and returns the written path.
+     *
+     * @param geojson GeoJSON string of road linestrings
+     * @return path of the written cache file
+     * @throws IOException if the write fails
+     */
+    public Path storeRoadLayer(String geojson) throws IOException {
+        ensureCacheDirectoryExists();
+        Path target = cacheDirectory.resolve(ROAD_CACHE_FILENAME);
+        Files.writeString(target, geojson);
+        log.info("Stored OSM road layer: {} chars → {}", geojson.length(), target);
+        return target;
     }
 
     private String buildFilename(LocalDate date) {

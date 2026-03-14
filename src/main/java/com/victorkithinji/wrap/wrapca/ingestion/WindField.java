@@ -19,4 +19,13 @@ public class WindField {
     float[][] directionDeg;
     int rows;
     int cols;
+
+    // Add these to make the calling code work and keep things tidy
+    public float getSpeed(int r, int c) {
+        return speedMs[r][c];
+    }
+
+    public float getDirection(int r, int c) {
+        return directionDeg[r][c];
+    }
 }

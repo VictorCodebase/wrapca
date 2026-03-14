@@ -56,5 +56,9 @@ public enum VegetationTypeEnum {
      * Non-combustible — cells of this type are set to
      * {@link CellStateEnum#NON_COMBUSTIBLE} at grid initialisation.
      */
-    BUILT
+    BUILT,
+
+    GRASSLAND,
+
+    CROPLAND
 }

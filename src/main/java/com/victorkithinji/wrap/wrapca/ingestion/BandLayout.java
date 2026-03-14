@@ -1,75 +1,57 @@
 package com.victorkithinji.wrap.wrapca.ingestion;
 
 /**
- * Defines the assumed band layout of the GeoTIFF produced by the CV module.
+ * Defines the confirmed band layout of the GeoTIFF produced by the CV module.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * ASSUMPTION RECORD — confirm with CV team before integration
+ * CONFIRMED BY CV TEAM
  * ─────────────────────────────────────────────────────────────────────────────
  *
- * Band ordering chosen here: NDVI=1, NDMI=2, ELEVATION=3
+ * Full band order (0-based GeoTools indices):
+ *   0  — Blue        (Sentinel-2 B02)
+ *   1  — Green       (Sentinel-2 B03)
+ *   2  — Red         (Sentinel-2 B04)
+ *   3  — NIR         (Sentinel-2 B08)
+ *   4  — SWIR        (Sentinel-2 B12)
+ *   5  — NDVI        (derived)
+ *   6  — NDMI        (derived)
+ *   7  — NDWI        (derived)
+ *   8  — Elevation   (Copernicus DEM, resampled to 10m)
+ *   9  — Slope       (derived from DEM)
+ *   10 — Aspect      (derived from DEM)
  *
- * Rationale for this ordering:
- *   • NDVI and NDMI are both derived from Sentinel-2 reflectance bands and are
- *     the primary CV outputs — placing them first is the natural CV-side ordering.
- *   • Elevation comes from Copernicus DEM, a separate source — placing it last
- *     reflects that it is a secondary, static layer appended to the fuel state map.
+ * The CA engine only reads bands 5, 6, 8, 9, 10. Bands 0–4 and 7 are present
+ * in the file but ignored. They are retained in the count for validation only.
  *
- * Alternative orderings to raise with CV:
- *   Option A (chosen here): NDVI=1, NDMI=2, ELEVATION=3
- *     Pro: matches the order CV derives them (optical bands first, DEM appended).
- *     Con: none significant.
+ * CRS: EPSG:32737 (WGS 84 / UTM Zone 37S) — confirmed.
  *
- *   Option B: ELEVATION=1, NDVI=2, NDMI=3
- *     Pro: elevation is static and never changes — some pipelines put static
- *          layers first as a convention.
- *     Con: less natural for a CV pipeline that produces optical indices first.
- *
- *   Option C: embed band identity in GeoTIFF band descriptions (metadata)
- *     Pro: completely order-independent; reader resolves by name not index.
- *     Con: requires CV to set band description strings on export, adds a small
- *          GeoTools lookup per read. This is the most robust option and is
- *          worth requesting from CV if their toolchain supports it easily.
- *          GeoTiffBandReaderService supports this path — see USE_BAND_NAMES flag.
- *
- * CRS assumption: WGS 84 / UTM Zone 37S (EPSG:32737)
- *   Appropriate for the Aberdare / central Kenya deployment area.
- *   CV must reproject to this CRS before export, or the grid initialiser
- *   will receive misaligned data. Raise this explicitly in the contract meeting.
- *
- * Pixel size assumption: 100 m
- *   Matches wrap.simulation.cell-size-metres. If CV exports at finer resolution
- *   (e.g. 10 m native Sentinel-2), GeoTiffBandReaderService performs
- *   block-averaging downsampling — see that class for details.
+ * Native pixel size: 10m × 10m.
+ * All Sentinel-2 bands and DEM layers are resampled to a common 10m grid by CV.
+ * The CA engine targets 100m (wrap.simulation.cell-size-metres). Downsampling
+ * from 10m to the target resolution is performed by RasterResamplerService
+ * (Group 5) — GeoTiffBandReaderService returns native resolution unchanged.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 public final class BandLayout {
 
     private BandLayout() {}
 
-    // GeoTools band indices are 0-based internally but GeoTIFF bands are 1-based.
-    // These constants use 0-based indexing as used by GeoTools GridCoverage2D.
+    // Bands read by the CA engine (0-based GeoTools indices)
+    public static final int NDVI_BAND      = 5;
+    public static final int NDMI_BAND      = 6;
+    public static final int ELEVATION_BAND = 8;
+    public static final int SLOPE_BAND     = 9;
+    public static final int ASPECT_BAND    = 10;
 
-    public static final int NDVI_BAND      = 0;
-    public static final int NDMI_BAND      = 1;
-    public static final int ELEVATION_BAND = 2;
+    // Total bands present in the file — used for validation only
+    public static final int EXPECTED_BAND_COUNT = 11;
 
-    // Band description strings to use when USE_BAND_NAMES = true.
-    // CV must set these in the GeoTIFF band metadata for name-based resolution to work.
-    public static final String NDVI_BAND_NAME      = "NDVI";
-    public static final String NDMI_BAND_NAME      = "NDMI";
-    public static final String ELEVATION_BAND_NAME = "ELEVATION";
+    // Minimum index the reader must be able to reach
+    public static final int MAX_REQUIRED_BAND_INDEX = ASPECT_BAND;
 
-    /**
-     * When true, GeoTiffBandReaderService resolves bands by description string
-     * rather than by index. Safer, but requires CV to set band names on export.
-     *
-     * Set to false until confirmed with CV team.
-     */
-    public static final boolean USE_BAND_NAMES = false;
-
-    public static final int EXPECTED_BAND_COUNT = 3;
-
-    /** Expected CRS authority code. Reader will log a warning if the file differs. */
+    /** Expected CRS authority code. Reader logs a warning if the file differs. */
     public static final String EXPECTED_CRS_CODE = "EPSG:32737";
+
+    /** Expected native pixel size in metres. Reader logs a warning if the file differs. */
+    public static final double EXPECTED_NATIVE_PIXEL_SIZE = 10.0;
 }

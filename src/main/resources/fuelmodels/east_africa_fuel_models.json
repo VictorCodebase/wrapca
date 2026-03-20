@@ -7,8 +7,8 @@
       "heatContent_kJ_kg": 18622,
       "savRatio_m2_m3": 4921
     },
-    "MONTANE_GRASSLAND": {
-      "description": "High-altitude montane grassland — fine, dry grass fuels",
+    "GRASSLAND": {
+      "description": "Open grassland and savannah — fine, fast-drying grass fuels",
       "ovendryFuelLoad_kg_m2": 0.45,
       "moistureOfExtinction_fraction": 0.15,
       "heatContent_kJ_kg": 18622,
@@ -27,6 +27,13 @@
       "moistureOfExtinction_fraction": 0.12,
       "heatContent_kJ_kg": 18622,
       "savRatio_m2_m3": 3281
+    },
+    "CROPLAND": {
+      "description": "Cultivated agricultural land — crop residue, grassland-equivalent fuel parameters",
+      "ovendryFuelLoad_kg_m2": 0.45,
+      "moistureOfExtinction_fraction": 0.15,
+      "heatContent_kJ_kg": 18622,
+      "savRatio_m2_m3": 11483
     },
     "WATER": {
       "description": "Water body — non-combustible, sentinel value",

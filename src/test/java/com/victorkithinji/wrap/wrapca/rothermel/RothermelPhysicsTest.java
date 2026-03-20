@@ -243,7 +243,7 @@ class RothermelPhysicsTest {
     @DisplayName("RothermelRosCalculator — full ROS")
     class RosIntegrationTests {
 
-        private final FuelModel grassFuel = FuelModelResolver.resolve(VegetationTypeEnum.MONTANE_GRASSLAND);
+        private final FuelModel grassFuel = FuelModelResolver.resolve(VegetationTypeEnum.GRASSLAND);
         private final FuelModel forestFuel = FuelModelResolver.resolve(VegetationTypeEnum.AFROMONTANE_FOREST);
 
         @Test

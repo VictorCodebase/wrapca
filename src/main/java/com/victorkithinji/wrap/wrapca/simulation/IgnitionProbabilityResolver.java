@@ -33,10 +33,8 @@ import java.util.List;
 @Component
 public class IgnitionProbabilityResolver {
 
-    private final FuelModelResolver fuelModelResolver;
 
-    public IgnitionProbabilityResolver(FuelModelResolver fuelModelResolver) {
-        this.fuelModelResolver = fuelModelResolver;
+    public IgnitionProbabilityResolver() {
     }
 
     /**
@@ -84,7 +82,7 @@ public class IgnitionProbabilityResolver {
 
 
             // 3. ROS from source fuel parameters
-            FuelModel fuel = fuelModelResolver.resolve(sourceEnv.getVegetationType());
+            FuelModel fuel = FuelModelResolver.resolve(sourceEnv.getVegetationType());
             double ros = RothermelRosCalculator.computeRos(fuel, sourceEnv.getNdmi(), ue, phi); // m/min
 
             // 4. Directional transition probability

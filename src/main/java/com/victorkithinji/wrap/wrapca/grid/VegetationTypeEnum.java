@@ -1,64 +1,59 @@
 package com.victorkithinji.wrap.wrapca.grid;
 
-//TODO: Add a fuelmodels/east_africa_fuel_models.json to ap veg types to fuel models
 /**
- * Vegetation classification for a CA grid cell, derived from the CV
- * fuel-state map (Sentinel-2 classification output).
+ * Land cover classification for a CA grid cell.
  *
- * <p>Each constant maps to a set of Rothermel fuel parameters loaded from
- * {@code fuelmodels/east_africa_fuel_models.json} by
- * {@code rothermel.FuelModelResolver}. The resolver treats this enum as the
- * lookup key — adding a new type here requires a matching entry in that JSON
- * file before it can participate in ROS calculations.
+ * <p>Values are resolved from ESA WorldCover class codes by
+ * {@link GridInitialiserService} using {@code ingestion.EsaBandLayout.toVegetationType()}.
  *
- * <p>{@code WATER} and {@code BUILT} are non-combustible by definition;
- * cells carrying these types are initialised as
- * {@link CellStateEnum#NON_COMBUSTIBLE} and are never evaluated by the engine.
+ * <p><strong>Ordinal contract:</strong> ordinals are emitted in
+ * {@code PhaseOneResultResponse.vegetationTypeOrdinals[]} and consumed by the
+ * frontend for display labelling. Do not reorder existing constants. New
+ * constants must be appended only.
+ *
+ * <p><strong>Fuel model contract:</strong> every constant must have a matching
+ * entry in {@code resources/fuelmodels/east_africa_fuel_models.json}.
+ * {@code FuelModelResolver} throws at runtime if an entry is absent.
+ * {@code CROPLAND} uses grassland-equivalent fuel parameters (DEV-004).
+ *
+ * <p><strong>NON_COMBUSTIBLE assignment:</strong> combustibility is not
+ * determined by this enum alone. {@link GridInitialiserService} marks cells
+ * NON_COMBUSTIBLE when the ESA code is WATER (80), BUILT (50), or one of the
+ * outside-deployment-area codes (70, 95) — regardless of what
+ * {@code VegetationType} those codes resolve to. Consult that service for the
+ * full rule.
  */
 public enum VegetationTypeEnum {
 
-    /**
-     * Dense highland forest: Afromontane evergreen canopy typical of
-     * Aberdare, Mt Kenya, and Mau Forest zones.
-     * High fuel load, relatively high live moisture content.
-     */
+    /** Dense Afromontane canopy. High fuel load, elevated moisture. */
     AFROMONTANE_FOREST,
 
     /**
-     * Open montane grassland and moorland above the forest line.
-     * Lower fuel load than forest but fast-drying; elevated ROS under wind.
+     * Open grassland and savannah. Fast-drying under wind, elevated ROS.
+     *
+     * <p>Renamed from {@code MONTANE_GRASSLAND} — the "montane" qualifier
+     * implied high-altitude ecology exclusively, which is misleading when the
+     * grid extends to lower elevations (DEV-003). Fuel parameters unchanged.
      */
-    MONTANE_GRASSLAND,
+    GRASSLAND,
 
-    /**
-     * Mixed shrubland and bushed grassland at mid-altitude transitions.
-     * Intermediate fuel load and moisture regime.
-     */
+    /** Woody shrubland. Intermediate fuel load and moisture. */
     SHRUBLAND,
 
-    /**
-     * Bare soil, exposed rock, or sparsely vegetated ground.
-     * Minimal fuel load; ROS will be very low but not zero — residual litter
-     * may still carry fire slowly.
-     */
+    /** Bare or sparsely vegetated soil. Minimal fuel load. */
     BARE_SOIL,
 
     /**
-     * Open water (lakes, rivers, wetlands).
-     * Non-combustible — cells of this type are set to
-     * {@link CellStateEnum#NON_COMBUSTIBLE} at grid initialisation.
+     * Cultivated agricultural land. Grassland-equivalent Rothermel fuel
+     * parameters. Named separately from {@link #GRASSLAND} so the frontend
+     * can display "Cropland" rather than "Grassland" for farmland cells
+     * (DEV-004).
      */
+    CROPLAND,
+
+    /** Water body. Cells of this type are initialised as NON_COMBUSTIBLE. */
     WATER,
 
-    /**
-     * Built-up / urban / infrastructure land cover (roads, buildings,
-     * settlements derived from OSM).
-     * Non-combustible — cells of this type are set to
-     * {@link CellStateEnum#NON_COMBUSTIBLE} at grid initialisation.
-     */
-    BUILT,
-
-    GRASSLAND,
-
-    CROPLAND
+    /** Built-up / impervious surface. Cells of this type are initialised as NON_COMBUSTIBLE. */
+    BUILT
 }

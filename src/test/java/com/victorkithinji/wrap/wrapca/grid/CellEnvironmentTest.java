@@ -51,7 +51,7 @@ class CellEnvironmentTest {
     @Test
     void differentVegetationType_notEqual() {
         CellEnvironment grassland = new CellEnvironment(
-                0.72f, 0.45f, 0.1745f, 1.5708f, VegetationTypeEnum.MONTANE_GRASSLAND
+                0.72f, 0.45f, 0.1745f, 1.5708f, VegetationTypeEnum.GRASSLAND
         );
         assertNotEquals(FOREST_CELL, grassland);
     }
@@ -76,7 +76,7 @@ class CellEnvironmentTest {
     @Test
     void zeroSlope_flatTerrain_isValid() {
         CellEnvironment flatCell = new CellEnvironment(
-                0.50f, 0.30f, 0.0f, 0.0f, VegetationTypeEnum.MONTANE_GRASSLAND
+                0.50f, 0.30f, 0.0f, 0.0f, VegetationTypeEnum.GRASSLAND
         );
         assertEquals(0.0f, flatCell.getSlopeRadians(), 1e-10f);
     }

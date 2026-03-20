@@ -23,7 +23,8 @@ class VegetationTypeTest {
     /** Types that must have a fuel model entry and participate in ROS calculations. */
     private static final Set<VegetationTypeEnum> COMBUSTIBLE_TYPES = Set.of(
             VegetationTypeEnum.AFROMONTANE_FOREST,
-            VegetationTypeEnum.MONTANE_GRASSLAND,
+            VegetationTypeEnum.CROPLAND,
+            VegetationTypeEnum.GRASSLAND,
             VegetationTypeEnum.SHRUBLAND,
             VegetationTypeEnum.BARE_SOIL
     );
@@ -45,7 +46,7 @@ class VegetationTypeTest {
 
     @Test
     void montaneGrassland_isCombustible() {
-        assertTrue(COMBUSTIBLE_TYPES.contains(VegetationTypeEnum.MONTANE_GRASSLAND));
+        assertTrue(COMBUSTIBLE_TYPES.contains(VegetationTypeEnum.GRASSLAND));
     }
 
     @Test
@@ -76,7 +77,7 @@ class VegetationTypeTest {
     void totalTypeCount_matchesExpected() {
         // Guard against a new type being added without updating the
         // combustibility sets or the fuel models JSON.
-        assertEquals(6, VegetationTypeEnum.values().length,
+        assertEquals(7, VegetationTypeEnum.values().length,
                 "New VegetationType requires an entry in east_africa_fuel_models.json " +
                         "and classification in the combustibility sets above");
     }

@@ -18,7 +18,7 @@ class GridTestFactory {
      * Builds a rows × cols grid where every cell is UNBURNED GRASSLAND with
      * the supplied ndmi. All slope / aspect values are zero (flat, no aspect).
      */
-    static CaGrid unburnedGrid(int rows, int cols, float ndmi) {
+    static CaGrid unburnedGridVegetation(int rows, int cols, float ndmi, VegetationTypeEnum vegetationType) {
         CellEnvironment[][] env = new CellEnvironment[rows][cols];
         int[][] states = new int[rows][cols]; // zero-init = UNBURNED
 
@@ -27,7 +27,7 @@ class GridTestFactory {
                 ndmi,                       // ndmi (moisture proxy)
                 0.0f,                       // slopeRadians
                 0.0f,                       // aspectRadians
-                VegetationTypeEnum.GRASSLAND
+                vegetationType
         );
 
         for (int r = 0; r < rows; r++) {
@@ -38,6 +38,11 @@ class GridTestFactory {
 
         return new CaGrid(states, env, rows, cols, CELL_SIZE);
     }
+
+    static CaGrid unburnedGrid(int rows, int cols, float ndmi){
+        VegetationTypeEnum vegetation = VegetationTypeEnum.GRASSLAND;
+        return  unburnedGridVegetation(rows, cols, ndmi, vegetation);
+    };
 
     /**
      * Sets a single cell to BURNING. Mutates the states array directly —
@@ -81,5 +86,48 @@ class GridTestFactory {
             }
         }
         return count;
+    }
+
+    /**
+     * Counts BURNED or BURNING cells within a column band (inclusive).
+     * Used to assert directional spread asymmetry east/west.
+     */
+    static int countBurnedInColumns(CaGrid grid, int fromCol, int toCol){
+        int count = 0;
+
+        for (int r=0; r<grid.rows; r++){
+            for (int c = fromCol; c <= toCol; c++ ){
+                CellStateEnum s = grid.getState(r,c);
+                if(s==CellStateEnum.BURNED || s==CellStateEnum.BURNING) count++;
+            }
+        }
+        return  count;
+    }
+
+    /**
+     * Counts BURNED or BURNING cells within a row band (inclusive).
+     * Used to assert directional spread asymmetry north/south.
+     */
+    static int countBurnedInRows(CaGrid grid, int fromRow, int toRow){
+        int count = 0;
+
+        for (int r = fromRow; r <= toRow; r++){
+            for (int c = 0; c < grid.cols; c++){
+                CellStateEnum s = grid.getState(r,c);
+                if (s == CellStateEnum.BURNING || s == CellStateEnum.BURNED) count++;
+            }
+        }
+        return count;
+    }
+
+    /** Returns true if every cell in the grid is BURNED or BURNING. */
+    static boolean isFullyBurned(CaGrid grid) {
+        for (int r = 0; r < grid.rows; r++) {
+            for (int c = 0; c < grid.cols; c++) {
+                CellStateEnum s = grid.getState(r, c);
+                if (s != CellStateEnum.BURNED && s != CellStateEnum.BURNING) return false;
+            }
+        }
+        return true;
     }
 }

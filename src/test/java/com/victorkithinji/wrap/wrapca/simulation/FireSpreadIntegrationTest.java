@@ -151,7 +151,7 @@ public class FireSpreadIntegrationTest {
 
     @Test
     void diagnostic_rosAndPe_acrossWindSpeeds() {
-        FuelModel grass = FuelModelResolver.resolve(VegetationTypeEnum.GRASSLAND);
+        FuelModel grass = FuelModelResolver.resolve(VegetationTypeEnum.AFROMONTANE_FOREST);
         double moisture = 0.05;
         double timeStep = 5.0;  // test new config
         double distance = 10.0; // test cell size

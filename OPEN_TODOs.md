@@ -31,3 +31,9 @@ correctness issue — the simulation will run without errors either way.
 
 **Owner:** Group 5 (constants live in `GridInitialiserService`)
 **Dependency:** Field measurement data — not yet available at time of writing.
+
+
+## TODO-002 - Update Pe due to wind. saturation too early (group 6)
+winds above 2m/s saturate Pe such that fire spreads at maximum pe. 
+a suggestion is to have pe computed as a sigmoid. An issue with this approach is the value of K in the formula needs 
+to be derived from empirical studies.

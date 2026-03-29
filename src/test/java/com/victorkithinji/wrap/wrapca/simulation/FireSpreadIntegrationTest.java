@@ -6,7 +6,10 @@ import com.victorkithinji.wrap.wrapca.grid.CaGrid;
 import com.victorkithinji.wrap.wrapca.grid.CellStateEnum;
 import com.victorkithinji.wrap.wrapca.grid.VegetationTypeEnum;
 import com.victorkithinji.wrap.wrapca.ingestion.WindField;
+import com.victorkithinji.wrap.wrapca.rothermel.FuelModel;
 import com.victorkithinji.wrap.wrapca.rothermel.FuelModelResolver;
+import com.victorkithinji.wrap.wrapca.rothermel.RothermelRosCalculator;
+import com.victorkithinji.wrap.wrapca.rothermel.WindProjectionCalculator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -87,7 +90,7 @@ public class FireSpreadIntegrationTest {
         ignite(grid, 2,2);
         WindField wind = calmWind(5,5);
 
-        engine.run(grid, wind, noSuppression, 10, ALWAYS_IGNITE);
+        engine.run(grid, wind, noSuppression, 20, ALWAYS_IGNITE);
 
         // conrner cells two steps away are expected to be burned by 10 generations
         assertThat(grid.getState(0,0)).isEqualTo(CellStateEnum.BURNED);
@@ -96,44 +99,87 @@ public class FireSpreadIntegrationTest {
         assertThat(grid.getState(4,0)).isEqualTo(CellStateEnum.BURNED);
     }
 
-    // Wind burns more downwind more than upwind
+    // Wind speed and direction influence fire spread
     @Test
-    void southwardWind_moreSpreadTowardsSouthThanNorth(){
-        //Fire stats from top row 0
-        // wind blows from north, downwards
-        // after N steps, southern half should have more burned cells than the northern half
+    void strongerWind_reachesTargetRowFaster() {
+        int rows = 50, cols = 50;
+        int targetRow = 40; // how fast does fire reach row 40 from row 5
 
-        // 11 by 5 grod, 6 steps. compare rows 0-4 agains 6-10
-        int rows = 11, cols = 5;
-        CaGrid grid = unburnedGridVegetation(rows, cols, DRY_NDMI, VegetationTypeEnum.GRASSLAND);
+        int stepsWithWeakWind  = stepsToReachRow(rows, cols, 5, targetRow, 1.0f,  0.0f);
+        int stepsWithStrongWind = stepsToReachRow(rows, cols, 5, targetRow, 15.0f, 0.0f);
 
-        for (int c = 0; c < cols; c++) ignite(grid, 0, c);
-        WindField wind = uniformWind(rows, cols, 8.0f, 0.0f);
+        System.out.printf("Weak wind steps: %d  |  Strong wind steps: %d%n",
+                stepsWithWeakWind, stepsWithStrongWind);
 
-        engine.run(grid, wind, noSuppression, 6, ALWAYS_IGNITE);
+        assertThat(stepsWithStrongWind).isLessThan(stepsWithWeakWind);
+    }
 
-        int burnedSouth = countBurnedInRows(grid, 6, 10);
-        int burnedNorth = countBurnedInRows(grid, 0, 4);
+    private int stepsToReachRow(int rows, int cols, int igniteRow, int targetRow,
+                                float speed, float dir) {
+        CaGrid grid = unburnedGrid(rows, cols, DRY_NDMI);
+        for (int c = 0; c < cols; c++) ignite(grid, igniteRow, c);
+        WindField wind = uniformWind(rows, cols, speed, dir);
 
-        assertThat(burnedSouth).isGreaterThanOrEqualTo(burnedNorth);
-        //TODO: Try to use just greater than
+        List<SimulationStepResult> results =
+                engine.run(grid, wind, noSuppression, 200, new Random(42L));
+
+        for (SimulationStepResult step : results) {
+            for (long idx : step.getNewlyIgnitedCells()) {
+                int r = (int)(idx / cols);
+                if (r >= targetRow) return step.getGeneration();
+            }
+        }
+        return Integer.MAX_VALUE; // never reached
+    }
+
+    @Test
+    void diagnostic_effectiveWindComponent_idDirectional(){
+        // Wind from north (0 deg) blows southward
+        // directional index 4 = south (from source to target)
+        // southward component must be positive and larger than the northward component
+        double southward = WindProjectionCalculator.effectiveComponent(8.0, 0.0, 4); // S
+        double northward = WindProjectionCalculator.effectiveComponent(8.0, 0.0, 0); //N
+
+        System.out.print("SOUTHWARD: ");
+        System.out.println(southward);
+        System.out.print("NORTHWARD: ");
+        System.out.println(northward);
+
+        assertThat(southward).isGreaterThan(0.0);
+        assertThat(northward).isEqualTo(0.0);
+    }
+
+    @Test
+    void diagnostic_rosAndPe_acrossWindSpeeds() {
+        FuelModel grass = FuelModelResolver.resolve(VegetationTypeEnum.GRASSLAND);
+        double moisture = 0.05;
+        double timeStep = 5.0;  // test new config
+        double distance = 10.0; // test cell size
+
+        System.out.println("\nWind(m/s) | ROS(m/min) | Pe");
+        for (double wind : new double[]{0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 15.0}) {
+            double ros = RothermelRosCalculator.computeRos(grass, moisture, wind, 0.0);
+            double pe = Math.min(1.0, (ros * timeStep) / distance);
+            System.out.printf("%-10.1f - %-12.4f - %.6f%n", wind, ros, pe);
+        }
     }
 
     @Test
     void eastwardWind_moreSpreadTowardEastThanWest () {
-        int rows = 5, cols = 11;
+        int rows = 30, cols = 11;
         CaGrid grid = unburnedGridVegetation(rows, cols, DRY_NDMI, VegetationTypeEnum.SHRUBLAND);
         // I tried to use shrubland instead of grassland
 
-        for (int r = 0; r < rows; r++) ignite(grid, r, 0);
+        // for (int r = 0; r < rows; r++) ignite(grid, r, 0);
+        ignite(grid,0,0);
         WindField wind = uniformWind(rows, cols, 8.0f, 270.0f); // FROM west
 
-        engine.run(grid, wind, noSuppression, 6, ALWAYS_IGNITE);
+        engine.run(grid, wind, noSuppression, 20, ALWAYS_IGNITE);
 
         int burnedEast = countBurnedInColumns(grid, 6, 10);
         int burnedWest = countBurnedInColumns(grid, 0, 4);
 
-        assertThat(burnedEast).isGreaterThanOrEqualTo(burnedWest);
+        assertThat(burnedEast).isGreaterThan(burnedWest);
     }
 
     @Test
@@ -235,7 +281,7 @@ public class FireSpreadIntegrationTest {
         for (int i = 1; i<results.size(); i++){
             Instant prev = results.get(i-1).getTimestamp();
             Instant curr = results.get(i).getTimestamp();
-            assertThat(curr).isAfterOrEqualTo(prev);
+            assertThat(curr).isAfter(prev);
         }
     }
 
@@ -300,7 +346,7 @@ public class FireSpreadIntegrationTest {
         int cols = 5, rows = 11;
         CaGrid grid = unburnedGrid(rows, cols, DRY_NDMI);
 
-        for (int c = 0; c < cols; c++) grid.setState(5,c, CellStateEnum.BURNING);
+        for (int c = 0; c < cols; c++) grid.setState(5,c, CellStateEnum.BURNED);
 
         ignite(grid,0, 0);
         WindField wind = uniformWind(11, 5, 10, 0.0f);

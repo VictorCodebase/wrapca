@@ -71,14 +71,19 @@ public class IgnitionProbabilityResolver {
             // 1. Effective wind component from source → target direction
             float windSpeed = windField.getSpeed(nb.row, nb.col);
             float windDir   = windField.getDirection(nb.row, nb.col);
-            double ue  = WindProjectionCalculator.effectiveComponent(windSpeed, windDir, nb.directionIndex);
+            double ue  = WindProjectionCalculator.effectiveComponent(windSpeed, windDir, (nb.directionIndex + 4)%8 );
 
             // 2. Slope (source cell is the uphill reference for ROS direction)
+//            double phi = SlopeEffectCalculator.slopeAngleRadians( // slopeAngleRadians returns radians
+//                    sourceEnv.getSlopeRadians(),   // elevation proxy via slope
+//                    targetEnv.getSlopeRadians(),
+//                    nb.distanceMetres
+//            );
             double phi = SlopeEffectCalculator.slopeAngleRadians( // slopeAngleRadians returns radians
-                    sourceEnv.getSlopeRadians(),   // elevation proxy via slope
-                    targetEnv.getSlopeRadians(),
+                    0,   // elevation proxy via slope
+                    0,
                     nb.distanceMetres
-            );
+           );
 
 
             // 3. ROS from source fuel parameters

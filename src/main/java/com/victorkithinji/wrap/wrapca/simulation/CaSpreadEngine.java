@@ -117,7 +117,7 @@ public class CaSpreadEngine {
                     Instant.now()
             ));
         }
-
+        advanceBurning(grid);
         return results;
     }
 

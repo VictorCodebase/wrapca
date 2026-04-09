@@ -68,10 +68,10 @@ public class GridInitialiserService {
      * field moisture measurements become available. No other class needs to change.
      * Record any coefficient change in {@code deviation-discourse.md}.
      */
-    private static final float NDMI_DRY_ANCHOR = -0.1f;
-    private static final float MOISTURE_MIN = 0.03f;
-    private static final float MOISTURE_SLOPE = 0.35f;
-    private static final float MOISTURE_MAX = 0.40f;
+    private static final float NDMI_DRY_ANCHOR   = -0.1f;   // raw NDMI that maps to MOISTURE_MIN
+    private static final float MOISTURE_MIN       =  0.03f;  // minimum physical moisture fraction (critically dry)
+    private static final float MOISTURE_SLOPE     =  0.35f;  // (delta moisture) / (delta NDMI)
+    private static final float MOISTURE_MAX       =  0.40f;  // upper clamp — saturated vegetation
 
     /**
      * Builds a {@link GridInitResult} from resampled inputs.
@@ -118,15 +118,16 @@ public class GridInitialiserService {
                 double cellCentreX = originX + (c + 0.5) * cellSize;
                 double cellCentreY = originY - (r + 0.5) * cellSize;
 
-                float ndvi      = bands.getNdvi()[r][c];
-                float ndmi      = scaledMoisture(bands.getNdmi()[r][c]);
-                float slopeRad  = (float) Math.toRadians(bands.getSlopeDegrees()[r][c]);
-                float aspectRad = bands.getAspectRadians()[r][c];
+                float ndvi         = bands.getNdvi()[r][c];
+                float ndmi         = scaledMoisture(bands.getNdmi()[r][c]);
+                float elevationM   = bands.getElevationMetres()[r][c];
+                float slopeRad     = (float) Math.toRadians(bands.getSlopeDegrees()[r][c]);
+                float aspectRad    = bands.getAspectRadians()[r][c];
 
                 int                esaCode = esaCodes[r][c];
                 VegetationTypeEnum vegType = EsaBandLayout.toVegetationTypeEnum(esaCode);
 
-                envs[r][c] = new CellEnvironment(ndvi, ndmi, slopeRad, aspectRad, vegType);
+                envs[r][c] = new CellEnvironment(ndvi, ndmi, elevationM, slopeRad, aspectRad, vegType);
 
                 if (NON_COMBUSTIBLE_CODES.contains(esaCode)) {
                     states[r][c] = CellStateEnum.NON_COMBUSTIBLE.ordinal();
@@ -146,6 +147,10 @@ public class GridInitialiserService {
         return new GridInitResult(grid, roadProximity);
     }
 
+    // -------------------------------------------------------------------------
+    // Band scaling
+    // -------------------------------------------------------------------------
+
     /**
      * Maps raw Sentinel-2 NDMI (approx −1 to +1) to a Rothermel-compatible
      * live fuel moisture fraction consumed by {@code RothermelRosCalculator}.
@@ -158,10 +163,9 @@ public class GridInitialiserService {
      * <p>Coefficients are defined as named constants above this method.
      * Update those constants — not this method — when field data is available.
      */
-    public static float scaledMoisture(float rawNDMI){
-        float ndmi = Math.max(-1.0f, Math.min(1.0f, rawNDMI));
+    private static float scaledMoisture(float rawNdmi) {
+        float ndmi     = Math.max(-1.0f, Math.min(1.0f, rawNdmi));
         float moisture = MOISTURE_MIN + (ndmi - NDMI_DRY_ANCHOR) * MOISTURE_SLOPE;
-
         return Math.max(MOISTURE_MIN, Math.min(MOISTURE_MAX, moisture));
     }
 

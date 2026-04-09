@@ -6,7 +6,6 @@ import com.victorkithinji.wrap.wrapca.grid.CaGrid;
 import com.victorkithinji.wrap.wrapca.grid.CellStateEnum;
 import com.victorkithinji.wrap.wrapca.ingestion.WindField;
 import com.victorkithinji.wrap.wrapca.simulation.CaSpreadEngine;
-import com.victorkithinji.wrap.wrapca.simulation.SimulationStepResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -96,26 +95,20 @@ public class MonteCarloEnsembleRunner {
                     }
                     copy.setState(seedRow, seedCol, CellStateEnum.BURNING);
 
-                    List<SimulationStepResult> steps = caSpreadEngine.run(
+                    caSpreadEngine.run(
                             copy, windField, emptyRegistry, generations, new Random(taskSeed));
 
-                    // Record every cell that burned across all steps
-                    for (SimulationStepResult step : steps) {
-                        for (long idx : step.getNewlyIgnitedCells()) {
-                            accumulator.record(idx);
-                        }
-                    }
-
-                    // Also capture cells still BURNING at end of horizon
+                    // Record burn outcome from final grid state.
+                    // This is the only correct approach: newlyIgnitedCells never contains
+                    // the seed cell (it was BURNING before run() started), so step-by-step
+                    // accumulation would silently drop it. Scanning the final grid captures
+                    // the seed, all cells that spread and fully burned (BURNED), and any
+                    // cells still BURNING at the horizon limit.
                     for (int r = 0; r < copy.rows; r++) {
                         for (int c = 0; c < copy.cols; c++) {
                             CellStateEnum state = copy.getState(r, c);
-                            if (state == CellStateEnum.BURNING || state == CellStateEnum.BURNED) {
-                                // BURNED cells were already recorded via newlyIgnitedCells;
-                                // BURNING cells at horizon end may not have been — record them now.
-                                if (state == CellStateEnum.BURNING) {
-                                    accumulator.record(r, c);
-                                }
+                            if (state == CellStateEnum.BURNED || state == CellStateEnum.BURNING) {
+                                accumulator.record(r, c);
                             }
                         }
                     }

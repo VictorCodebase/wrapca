@@ -17,6 +17,7 @@ class CellEnvironmentTest {
     private static final CellEnvironment FOREST_CELL = new CellEnvironment(
             0.72f,          // ndvi  — dense canopy
             0.45f,          // ndmi  — moderately moist
+            1850.0f,        // elevationMetres
             0.1745f,        // slopeRadians — ~10°
             1.5708f,        // aspectRadians — east-facing (~90°)
             VegetationTypeEnum.AFROMONTANE_FOREST
@@ -24,17 +25,18 @@ class CellEnvironmentTest {
 
     @Test
     void constructor_storesAllFields() {
-        assertEquals(0.72f,   FOREST_CELL.getNdvi(),          1e-5f);
-        assertEquals(0.45f,   FOREST_CELL.getNdmi(),          1e-5f);
-        assertEquals(0.1745f, FOREST_CELL.getSlopeRadians(),  1e-4f);
-        assertEquals(1.5708f, FOREST_CELL.getAspectRadians(), 1e-4f);
+        assertEquals(0.72f,    FOREST_CELL.getNdvi(),             1e-5f);
+        assertEquals(0.45f,    FOREST_CELL.getNdmi(),             1e-5f);
+        assertEquals(1850.0f,  FOREST_CELL.getElevationMetres(),  1e-2f);
+        assertEquals(0.1745f,  FOREST_CELL.getSlopeRadians(),     1e-4f);
+        assertEquals(1.5708f,  FOREST_CELL.getAspectRadians(),    1e-4f);
         assertEquals(VegetationTypeEnum.AFROMONTANE_FOREST, FOREST_CELL.getVegetationType());
     }
 
     @Test
     void equalInstances_areEqual() {
         CellEnvironment duplicate = new CellEnvironment(
-                0.72f, 0.45f, 0.1745f, 1.5708f, VegetationTypeEnum.AFROMONTANE_FOREST
+                0.72f, 0.45f, 1850.0f, 0.1745f, 1.5708f, VegetationTypeEnum.AFROMONTANE_FOREST
         );
         assertEquals(FOREST_CELL, duplicate,
                 "Two CellEnvironment instances with identical fields must be equal");
@@ -43,15 +45,23 @@ class CellEnvironmentTest {
     @Test
     void differentNdvi_notEqual() {
         CellEnvironment drier = new CellEnvironment(
-                0.30f, 0.45f, 0.1745f, 1.5708f, VegetationTypeEnum.AFROMONTANE_FOREST
+                0.30f, 0.45f, 1850.0f, 0.1745f, 1.5708f, VegetationTypeEnum.AFROMONTANE_FOREST
         );
         assertNotEquals(FOREST_CELL, drier);
     }
 
     @Test
+    void differentElevation_notEqual() {
+        CellEnvironment lowerCell = new CellEnvironment(
+                0.72f, 0.45f, 900.0f, 0.1745f, 1.5708f, VegetationTypeEnum.AFROMONTANE_FOREST
+        );
+        assertNotEquals(FOREST_CELL, lowerCell);
+    }
+
+    @Test
     void differentVegetationType_notEqual() {
         CellEnvironment grassland = new CellEnvironment(
-                0.72f, 0.45f, 0.1745f, 1.5708f, VegetationTypeEnum.GRASSLAND
+                0.72f, 0.45f, 1850.0f, 0.1745f, 1.5708f, VegetationTypeEnum.GRASSLAND
         );
         assertNotEquals(FOREST_CELL, grassland);
     }
@@ -59,16 +69,15 @@ class CellEnvironmentTest {
     @Test
     void equalInstances_haveSameHashCode() {
         CellEnvironment duplicate = new CellEnvironment(
-                0.72f, 0.45f, 0.1745f, 1.5708f, VegetationTypeEnum.AFROMONTANE_FOREST
+                0.72f, 0.45f, 1850.0f, 0.1745f, 1.5708f, VegetationTypeEnum.AFROMONTANE_FOREST
         );
         assertEquals(FOREST_CELL.hashCode(), duplicate.hashCode());
     }
 
     @Test
     void ndvi_acceptsNegativeValues() {
-        // Water and cloud pixels can produce negative NDVI — the type must not reject them.
         CellEnvironment waterCell = new CellEnvironment(
-                -0.15f, -0.10f, 0.0f, 0.0f, VegetationTypeEnum.WATER
+                -0.15f, -0.10f, 1200.0f, 0.0f, 0.0f, VegetationTypeEnum.WATER
         );
         assertEquals(-0.15f, waterCell.getNdvi(), 1e-5f);
     }
@@ -76,7 +85,7 @@ class CellEnvironmentTest {
     @Test
     void zeroSlope_flatTerrain_isValid() {
         CellEnvironment flatCell = new CellEnvironment(
-                0.50f, 0.30f, 0.0f, 0.0f, VegetationTypeEnum.GRASSLAND
+                0.50f, 0.30f, 1600.0f, 0.0f, 0.0f, VegetationTypeEnum.GRASSLAND
         );
         assertEquals(0.0f, flatCell.getSlopeRadians(), 1e-10f);
     }

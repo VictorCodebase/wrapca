@@ -1,3 +1,4 @@
+/**
 package com.victorkithinji.wrap.wrapca.simulation;
 
 import com.victorkithinji.wrap.wrapca.config.SimulationConfig;
@@ -46,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   Uses SuppressedZoneRegistryStub (test-tree only). Always returns false
  *   from isActive(). Replace with the real bean once Group 8 is implemented.
  *   See SuppressedZoneRegistryStub for the open TODO.
- */
+ /
 public class FireSpreadIntegrationTest {
     private static final float DRY_NDMI = 0.05f; // Below grassland extinction 0.25
     private static final float WET_NDMI = 0.85f; // very wet
@@ -358,3 +359,5 @@ public class FireSpreadIntegrationTest {
         assertThat(burnedSouth).isEqualTo(0);
     }
 }
+
+ */

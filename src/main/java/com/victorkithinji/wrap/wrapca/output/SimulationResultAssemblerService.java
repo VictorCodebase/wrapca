@@ -1,0 +1,106 @@
+package com.victorkithinji.wrap.wrapca.output;
+
+import com.victorkithinji.wrap.wrapca.dto.response.PhaseOneResultResponse;
+import com.victorkithinji.wrap.wrapca.dto.response.PhaseTwoResultResponse;
+import com.victorkithinji.wrap.wrapca.dto.response.PerimeterSnapshot;
+import com.victorkithinji.wrap.wrapca.grid.CaGrid;
+import com.victorkithinji.wrap.wrapca.simulation.SimulationStepResult;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Converts simulation outputs into API response DTOs.
+ * Does not perform any simulation logic — reads grid state and step history only.
+ * Does not emit GeoTIFF bytes or raw grid arrays.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class SimulationResultAssemblerService {
+
+	private final PerimeterPolygonExtractorService perimeterExtractor;
+
+	/**
+	 * Assembles a Phase 1 result from Monte Carlo output arrays and the final grid.
+	 *
+	 * @param runId                 Unique identifier for this run.
+	 * @param grid                  The grid used for this run — read-only here.
+	 * @param damagePotentialValues Normalised burn-frequency values, one per cell, row-major.
+	 * @param ignitionProbValues    Normalised I(c) values, one per cell, row-major.
+	 * @return Populated {@link PhaseOneResultResponse}.
+	 */
+	public PhaseOneResultResponse assemblePhaseOne(
+		String runId,
+		CaGrid grid,
+		float[] damagePotentialValues,
+		float[] ignitionProbValues) {
+
+		int cellCount = grid.rows * grid.cols;
+
+		if (damagePotentialValues.length != cellCount) {
+			log.warn("damagePotentialValues length {} does not match grid cell count {}",
+				damagePotentialValues.length, cellCount);
+		}
+		if (ignitionProbValues.length != cellCount) {
+			log.warn("ignitionProbValues length {} does not match grid cell count {}",
+				ignitionProbValues.length, cellCount);
+		}
+
+		int[] vegetationTypeOrdinals = extractVegetationOrdinals(grid);
+
+		return new PhaseOneResultResponse(
+			runId,
+			damagePotentialValues,
+			ignitionProbValues,
+			vegetationTypeOrdinals,
+			grid.rows,
+			grid.cols);
+	}
+
+	/**
+	 * Assembles a Phase 2 result from the ordered list of step results.
+	 * Each step that produced newly ignited cells yields a perimeter snapshot.
+	 *
+	 * @param runId Unique identifier for this run.
+	 * @param grid  The grid in its final state after all generations.
+	 * @param steps Ordered list of step results from {@code CaSpreadEngine.run()}.
+	 * @return Populated {@link PhaseTwoResultResponse}.
+	 */
+	public PhaseTwoResultResponse assemblePhaseTwo(
+		String runId,
+		CaGrid grid,
+		List<SimulationStepResult> steps) {
+
+		List<PerimeterSnapshot> snapshots = new ArrayList<>();
+
+		for (SimulationStepResult step : steps) {
+			if (step.getNewlyIgnitedCells().isEmpty()) {
+				continue;
+			}
+			String geoJson = perimeterExtractor.extract(grid, step.getTimestamp());
+			snapshots.add(new PerimeterSnapshot(geoJson, step.getTimestamp().toString()));
+		}
+
+		log.debug("Phase 2 result assembled: runId={}, generations={}, snapshots={}",
+			runId, steps.size(), snapshots.size());
+
+		return new PhaseTwoResultResponse(runId, snapshots);
+	}
+
+	// --- private helpers ---
+
+	private int[] extractVegetationOrdinals(CaGrid grid) {
+		int[] ordinals = new int[grid.rows * grid.cols];
+		int idx = 0;
+		for (int r = 0; r < grid.rows; r++) {
+			for (int c = 0; c < grid.cols; c++) {
+				ordinals[idx++] = grid.environment[r][c].getVegetationType().ordinal();
+			}
+		}
+		return ordinals;
+	}
+}

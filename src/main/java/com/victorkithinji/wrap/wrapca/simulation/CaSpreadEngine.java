@@ -5,125 +5,112 @@ import com.victorkithinji.wrap.wrapca.correction.SuppressedZoneRegistry;
 import com.victorkithinji.wrap.wrapca.grid.CaGrid;
 import com.victorkithinji.wrap.wrapca.grid.CellStateEnum;
 import com.victorkithinji.wrap.wrapca.ingestion.WindField;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
 /**
- * Core Cellular Automata spread engine.
+ * Core CA spread engine. Runs up to a fixed number of generation steps on a
+ * mutable CaGrid, stopping early if the frontier empties.
  *
- * One generation step:
- *   1. Snapshot the current frontier (we evaluate cells from this snapshot,
- *      not from a set that may be modified mid-step).
- *   2. For each frontier cell, ask IgnitionProbabilityResolver for P(ignition).
- *   3. Roll a random number — if rand < P(ignition) the cell ignites.
- *   4. After all cells are evaluated, apply state transitions atomically:
- *        UNBURNED → BURNING for newly ignited cells.
- *   5. Advance BURNING → BURNED for cells that have been burning for one full
- *      step (simple one-step burn duration).
- *   6. Update the frontier tracker.
- *   7. Return a SimulationStepResult.
+ * Used by both Phase 1 (Monte Carlo, empty SuppressedZoneRegistry) and
+ * Phase 2 (active spread, populated registry).
  *
- * Thread safety: one engine instance per simulation run. Monte Carlo uses
- * independent instances with independent grid copies — no shared state.
+ * State transition order per generation:
+ *   1. Snapshot the current frontier (synchronous CA semantics).
+ *   2. For each frontier cell: check suppression, resolve Pe, roll rng.
+ *   3. Advance all BURNING cells to BURNED.
+ *   4. Apply newly ignited cells to BURNING.
+ *   5. Update frontier tracker.
+ *   6. Emit SimulationStepResult.
  *
- * The SuppressedZoneRegistry is checked before any frontier cell is evaluated;
- * suppressed cells are treated as NON_COMBUSTIBLE for the duration.
+ * Thread safety: CaGrid is not thread-safe. The Monte Carlo runner must call
+ * grid.deepCopy() before passing a copy to this method.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class CaSpreadEngine {
 
-    private final IgnitionProbabilityResolver ignitionResolver;
-    private final SimulationConfig            config;
-
-    public CaSpreadEngine(IgnitionProbabilityResolver ignitionResolver,
-                          SimulationConfig config) {
-        this.ignitionResolver = ignitionResolver;
-        this.config           = config;
-    }
+    private final IgnitionProbabilityResolver probabilityResolver;
+    private final SimulationConfig            simulationConfig;
 
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
 
     /**
-     * Run the engine for a fixed number of generations.
-     *
-     * @param grid               mutable grid — will be modified in place
-     * @param windField          wind conditions for this run
-     * @param suppressedZones    suppressed-zone registry; pass a blank registry
-     *                           for Phase 1 Monte Carlo runs
-     * @param generations        number of generation steps to execute
-     * @param rng                caller-supplied RNG (enables deterministic tests)
-     * @return ordered list of step results, one per generation
+     * Runs up to {@code generations} steps with a caller-supplied RNG.
+     * Mutates grid in place. Returns one SimulationStepResult per completed generation.
      */
     public List<SimulationStepResult> run(CaGrid grid,
                                           WindField windField,
                                           SuppressedZoneRegistry suppressedZones,
                                           int generations,
                                           Random rng) {
+        double timeStepMin = simulationConfig.getTimeStepMinutes();
 
         ActiveCellFrontierTracker frontier = new ActiveCellFrontierTracker();
         frontier.seedFromGrid(grid);
 
         List<SimulationStepResult> results = new ArrayList<>(generations);
-        double timeStepMin = config.getTimeStepMinutes();
 
         for (int gen = 0; gen < generations; gen++) {
-
             if (frontier.isEmpty()) {
-                break; // fire has died out — no point continuing
+                log.debug("Frontier empty at generation {}; stopping early.", gen);
+                break;
             }
 
+            // Step 1 — snapshot frontier (immutable view is sufficient; we iterate a copy)
             Set<Long> frontierSnapshot = new HashSet<>(frontier.getFrontier());
-            Set<Long> newlyIgnited     = new HashSet<>();
 
-            // --- evaluate each frontier cell ---
-            for (long idx : frontierSnapshot) {
-                int row = decodeRow(idx, grid.cols);
-                int col = decodeCol(idx, grid.cols);
+            // Step 2 — evaluate each frontier cell
+            Set<Long> toIgnite = new HashSet<>();
+            for (long cellIdx : frontierSnapshot) {
+                if (suppressedZones.isActive(cellIdx)) continue;
 
-                // Skip cells in a suppressed zone (treated as non-combustible)
-                if (suppressedZones.isActive(idx)) {
-                    continue;
-                }
+                int r = grid.decodeRow(cellIdx);
+                int c = grid.decodeCol(cellIdx);
 
-                double p = ignitionResolver.resolve(row, col, grid, windField, timeStepMin);
-
-                if (rng.nextDouble() < p) {
-                    newlyIgnited.add(idx);
+                double pe = probabilityResolver.resolve(r, c, grid, windField, timeStepMin);
+                if (pe > 0.0 && rng.nextDouble() < pe) {
+                    toIgnite.add(cellIdx);
                 }
             }
 
-            // --- advance BURNING → BURNED (cells that were burning last step) ---
-            Set<Long> burnedOut = advanceBurning(grid);
+            // Step 3 — BURNING → BURNED
+            Set<Long> newlyBurned = advanceBurningCells(grid);
 
-            // --- apply UNBURNED → BURNING transitions ---
-            applyIgnitions(newlyIgnited, grid);
+            // Step 4 — UNBURNED → BURNING
+            for (long cellIdx : toIgnite) {
+                int r = grid.decodeRow(cellIdx);
+                int c = grid.decodeCol(cellIdx);
+                grid.setState(r, c, CellStateEnum.BURNING);
+            }
 
-            // --- update frontier ---
-            frontier.onBurnOut(burnedOut, grid);
-            frontier.onIgnition(newlyIgnited, grid);
+            // Step 5 — update frontier
+            frontier.onBurnOut(newlyBurned, grid);
+            frontier.onIgnition(toIgnite, grid);
 
-            results.add(new SimulationStepResult(
-                    Collections.unmodifiableSet(newlyIgnited),
-                    gen,
-                    Instant.now()
-            ));
+            // Step 6 — emit result
+            results.add(new SimulationStepResult(toIgnite, gen, Instant.now()));
+
+            log.trace("Gen {}: ignited={}, burned={}, frontier={}", gen,
+                    toIgnite.size(), newlyBurned.size(), frontier.getFrontier().size());
         }
-        advanceBurning(grid);
+
         return results;
     }
 
     /**
-     * Convenience overload that creates a fresh Random internally.
-     * Used for production runs; pass an explicit RNG for reproducible tests.
+     * Convenience overload — creates a fresh Random internally.
      */
     public List<SimulationStepResult> run(CaGrid grid,
                                           WindField windField,
@@ -133,55 +120,26 @@ public class CaSpreadEngine {
     }
 
     // -------------------------------------------------------------------------
-    // State transition helpers
+    // Internals
     // -------------------------------------------------------------------------
 
     /**
-     * Transitions all currently BURNING cells to BURNED.
-     * Returns the set of cells that just burned out (needed to update frontier).
-     *
-     * Simple one-step burn duration: a cell that is BURNING at the start of a
-     * generation is BURNED by the end. This keeps the model consistent with the
-     * proposal's single-state-per-step semantics.
+     * Advances all currently BURNING cells to BURNED.
+     * Returns the set of encoded indices that transitioned.
      */
-    private Set<Long> advanceBurning(CaGrid grid) {
-        int[][] states = grid.states;
+    private Set<Long> advanceBurningCells(CaGrid grid) {
+        Set<Long> newlyBurned = new HashSet<>();
         int rows = grid.rows;
         int cols = grid.cols;
-        Set<Long> burnedOut = new HashSet<>();
 
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
-                if (states[r][c] == CellStateEnum.BURNING.ordinal()) {
-                    states[r][c] = CellStateEnum.BURNED.ordinal();
-                    burnedOut.add(ActiveCellFrontierTracker.encode(r, c, cols));
+                if (grid.getState(r, c) == CellStateEnum.BURNING) {
+                    grid.setState(r, c, CellStateEnum.BURNED);
+                    newlyBurned.add(grid.encodeIndex(r, c));
                 }
             }
         }
-        return burnedOut;
-    }
-
-    /** Writes BURNING state for each newly ignited cell. */
-    private void applyIgnitions(Set<Long> newlyIgnited, CaGrid grid) {
-        int[][] states = grid.states;
-        int cols = grid.cols;
-
-        for (long idx : newlyIgnited) {
-            int r = decodeRow(idx, cols);
-            int c = decodeCol(idx, cols);
-            states[r][c] = CellStateEnum.BURNING.ordinal();
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Encoding helpers (mirrors ActiveCellFrontierTracker)
-    // -------------------------------------------------------------------------
-
-    private static int decodeRow(long index, int gridCols) {
-        return (int) (index / gridCols);
-    }
-
-    private static int decodeCol(long index, int gridCols) {
-        return (int) (index % gridCols);
+        return newlyBurned;
     }
 }

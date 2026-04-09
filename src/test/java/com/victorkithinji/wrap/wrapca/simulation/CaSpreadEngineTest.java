@@ -3,9 +3,9 @@ package com.victorkithinji.wrap.wrapca.simulation;
 import com.victorkithinji.wrap.wrapca.config.SimulationConfig;
 import com.victorkithinji.wrap.wrapca.correction.SuppressedZoneRegistry;
 import com.victorkithinji.wrap.wrapca.grid.CaGrid;
+import com.victorkithinji.wrap.wrapca.grid.CellEnvironment;
 import com.victorkithinji.wrap.wrapca.grid.CellStateEnum;
 import com.victorkithinji.wrap.wrapca.ingestion.WindField;
-import com.victorkithinji.wrap.wrapca.rothermel.FuelModelResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -13,162 +13,125 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 
-import static com.victorkithinji.wrap.wrapca.simulation.GridTestFactory.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Behavioural tests for CaSpreadEngine.
- *
- * These tests use a seeded Random so results are deterministic. The strategy
- * per test is:
- *   - Force a "certain ignition" scenario (Random always returns 0.0, so any
- *     Pe > 0 triggers ignition) or a "certain survival" scenario (Random always
- *     returns 1.0, so nothing ever ignites) to make assertions binary.
- *   - Verify the state machine: UNBURNED → BURNING → BURNED, no re-ignition.
- *   - Verify suppression and wet-fuel short-circuits produce no spread.
- */
 class CaSpreadEngineTest {
 
-    private CaSpreadEngine engine;
-    private SuppressedZoneRegistry registry;
-
-    // A Random that always returns 0.0 — every Pe > 0 causes ignition
-    private static final Random ALWAYS_IGNITE = new Random() {
-        @Override public double nextDouble() { return 0.0; }
-    };
-
-    // A Random that always returns 1.0 — nothing ever ignites
-    private static final Random NEVER_IGNITE = new Random() {
-        @Override public double nextDouble() { return 1.0; }
-    };
+    private CaSpreadEngine        engine;
+    private SuppressedZoneRegistry emptyRegistry;
 
     @BeforeEach
     void setUp() {
         SimulationConfig config = new SimulationConfig();
+        config.setCellSizeMetres(100.0);
         config.setTimeStepMinutes(5);
-        config.setCellSizeMetres(CELL_SIZE);
 
-        IgnitionProbabilityResolver ignitionResolver = new IgnitionProbabilityResolver();
+        IgnitionProbabilityResolver resolver = new IgnitionProbabilityResolver(config);
+        engine = new CaSpreadEngine(resolver, config);
 
-        engine   = new CaSpreadEngine(ignitionResolver, config);
-        registry = new SuppressedZoneRegistry();
+        emptyRegistry = new SuppressedZoneRegistry();
     }
 
     // -------------------------------------------------------------------------
-    // State machine correctness
+    // No fire → empty result list
     // -------------------------------------------------------------------------
 
     @Test
-    void burningCellTransitionsToBurnedAfterOneStep() {
-        // 3×3 grid, centre burning, NEVER_IGNITE so nothing spreads.
-        // After one step the original BURNING cell must be BURNED.
-        CaGrid grid = unburnedGrid(3, 3, 0.2f);
-        ignite(grid, 1, 1);
-        WindField wind = calmWind(3, 3);
-
-        engine.run(grid, wind, registry, 1, NEVER_IGNITE);
-
-        assertThat(grid.states[1][1]).isEqualTo(CellStateEnum.BURNED.ordinal());
-    }
-
-    @Test
-    void burnedCellNeverReIgnites() {
-        // Set (1,1) to BURNED before the run. Surround it with BURNING cells.
-        // ALWAYS_IGNITE is used — but BURNED should never become BURNING.
-        CaGrid grid = unburnedGrid(3, 3, 0.2f);
-        grid.states[1][1] = CellStateEnum.BURNED.ordinal();
-        ignite(grid, 0, 0);
-        ignite(grid, 0, 1);
-        ignite(grid, 1, 0);
-        WindField wind = calmWind(3, 3);
-
-        engine.run(grid, wind, registry, 3, ALWAYS_IGNITE);
-
-        assertThat(grid.states[1][1]).isEqualTo(CellStateEnum.BURNED.ordinal());
-    }
-
-    @Test
-    void nonCombustibleCellNeverIgnites() {
-        CaGrid grid = unburnedGrid(3, 3, 0.2f);
-        ignite(grid, 1, 0);
-        grid.states[1][1] = CellStateEnum.NON_COMBUSTIBLE.ordinal();
-        WindField wind = calmWind(3, 3);
-
-        engine.run(grid, wind, registry, 5, ALWAYS_IGNITE);
-
-        assertThat(grid.states[1][1]).isEqualTo(CellStateEnum.NON_COMBUSTIBLE.ordinal());
-    }
-
-    // -------------------------------------------------------------------------
-    // Spread behaviour
-    // -------------------------------------------------------------------------
-
-    @Test
-    void fireSpreadsToBothSidesOfSingleBurningCell() {
-        // 1×5 row, centre (0,2) burning.  ALWAYS_IGNITE → neighbours (0,1) and
-        // (0,3) must have ignited within 2 steps.
-        CaGrid grid = unburnedGrid(1, 5, 0.1f);
-        ignite(grid, 0, 2);
-        WindField wind = calmWind(1, 5);
-
-        engine.run(grid, wind, registry, 2, ALWAYS_IGNITE);
-
-        // After step 1: (0,2) BURNED, (0,1) and (0,3) BURNING.
-        // After step 2: those become BURNED.
-        assertThat(grid.states[0][1]).isEqualTo(CellStateEnum.BURNED.ordinal());
-        assertThat(grid.states[0][3]).isEqualTo(CellStateEnum.BURNED.ordinal());
-    }
-
-    @Test
-    void noSpreadWhenRandAlwaysExceedsProbability() {
-        CaGrid grid = unburnedGrid(5, 5, 0.2f);
-        ignite(grid, 2, 2);
-        WindField wind = calmWind(5, 5);
-
-        engine.run(grid, wind, registry, 5, NEVER_IGNITE);
-
-        // Only the original cell should have changed state (BURNING → BURNED).
-        // All others remain UNBURNED.
-        int unburned = countCellsInState(grid, CellStateEnum.UNBURNED);
-        assertThat(unburned).isEqualTo(24); // 25 - 1
-    }
-
-    @Test
-    void stepResultListSizeMatchesGenerationsRun() {
-        CaGrid grid = unburnedGrid(5, 5, 0.2f);
-        ignite(grid, 2, 2);
-        WindField wind = calmWind(5, 5);
+    void returnsEmptyListWhenNoFire() {
+        CaGrid    grid = GridFactory.unburnedFlat(5, 5);
+        WindField wind = GridFactory.calmWind(5, 5);
 
         List<SimulationStepResult> results =
-                engine.run(grid, wind, registry, 4, NEVER_IGNITE);
+                engine.run(grid, wind, emptyRegistry, 10, deterministicRng(1L));
 
-        // Fire dies after step 1 (nothing spread), so engine stops early.
-        // Expect at most 4 results.
-        assertThat(results.size()).isLessThanOrEqualTo(4);
+        assertThat(results).isEmpty();
     }
 
+    // -------------------------------------------------------------------------
+    // Source cell advances BURNING → BURNED each generation
+    // -------------------------------------------------------------------------
+
     @Test
-    void stepResultGenerationCountersAreSequential() {
-        CaGrid grid = unburnedGrid(7, 7, 0.2f);
-        ignite(grid, 3, 3);
-        WindField wind = uniformWind(7, 7, 5.0f, 180.0f);
+    void burningCellBecomesAfterFirstGeneration() {
+        CaGrid    grid = GridFactory.singleBurningCell(3, 3, 1, 1);
+        WindField wind = GridFactory.calmWind(3, 3);
+
+        engine.run(grid, wind, emptyRegistry, 1, deterministicRng(1L));
+
+        assertThat(grid.getState(1, 1)).isEqualTo(CellStateEnum.BURNED);
+    }
+
+    // -------------------------------------------------------------------------
+    // Fire spreads to at least one neighbour over enough generations (dry fuel)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void fireSpreadsToNeighboursOverTime() {
+        // 5×5 grid, dry grassland, centre BURNING. Run 10 generations with
+        // deterministic RNG seeded for spreading. At least one neighbour must ignite.
+        CaGrid    grid = GridFactory.singleBurningCell(5, 5, 2, 2);
+        WindField wind = GridFactory.southerlyWind(5, 5, 5.0f);
+
+        engine.run(grid, wind, emptyRegistry, 10, alwaysIgniteRng());
+
+        // At least one cell other than the origin must be BURNED or BURNING
+        boolean spread = false;
+        for (int r = 0; r < 5; r++) {
+            for (int c = 0; c < 5; c++) {
+                if (r == 2 && c == 2) continue;
+                CellStateEnum s = grid.getState(r, c);
+                if (s == CellStateEnum.BURNED || s == CellStateEnum.BURNING) {
+                    spread = true;
+                }
+            }
+        }
+        assertThat(spread).isTrue();
+    }
+
+    // -------------------------------------------------------------------------
+    // Generation counter is sequential and zero-based
+    // -------------------------------------------------------------------------
+
+    @Test
+    void generationCountersAreSequentialFromZero() {
+        CaGrid    grid = GridFactory.singleBurningCell(5, 5, 2, 2);
+        WindField wind = GridFactory.calmWind(5, 5);
 
         List<SimulationStepResult> results =
-                engine.run(grid, wind, registry, 5, ALWAYS_IGNITE);
+                engine.run(grid, wind, emptyRegistry, 5, alwaysIgniteRng());
 
         for (int i = 0; i < results.size(); i++) {
             assertThat(results.get(i).getGeneration()).isEqualTo(i);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Result count never exceeds requested generations
+    // -------------------------------------------------------------------------
+
     @Test
-    void stepResultTimestampsAreNonDecreasing() {
-        CaGrid grid = unburnedGrid(7, 7, 0.2f);
-        ignite(grid, 3, 3);
-        WindField wind = uniformWind(7, 7, 5.0f, 180.0f);
+    void resultCountNeverExceedsRequestedGenerations() {
+        CaGrid    grid = GridFactory.singleBurningCell(5, 5, 2, 2);
+        WindField wind = GridFactory.southerlyWind(5, 5, 5.0f);
+
+        int requested = 4;
+        List<SimulationStepResult> results =
+                engine.run(grid, wind, emptyRegistry, requested, alwaysIgniteRng());
+
+        assertThat(results.size()).isLessThanOrEqualTo(requested);
+    }
+
+    // -------------------------------------------------------------------------
+    // Timestamps are non-decreasing
+    // -------------------------------------------------------------------------
+
+    @Test
+    void timestampsAreNonDecreasing() {
+        CaGrid    grid = GridFactory.singleBurningCell(5, 5, 2, 2);
+        WindField wind = GridFactory.southerlyWind(5, 5, 5.0f);
 
         List<SimulationStepResult> results =
-                engine.run(grid, wind, registry, 5, ALWAYS_IGNITE);
+                engine.run(grid, wind, emptyRegistry, 5, alwaysIgniteRng());
 
         for (int i = 1; i < results.size(); i++) {
             Instant prev = results.get(i - 1).getTimestamp();
@@ -178,76 +141,148 @@ class CaSpreadEngineTest {
     }
 
     // -------------------------------------------------------------------------
-    // Wet fuel — no spread when moisture exceeds extinction threshold
+    // Suppressed cell is not ignited
     // -------------------------------------------------------------------------
 
     @Test
-    void noSpreadWhenFuelIsSaturated() {
-        // GRASSLAND moistureOfExtinction in the fuel model JSON is 0.25.
-        // Setting ndmi = 0.9 (90 % moisture) must produce zero ROS → Pe = 0 → no spread.
-        // We use ALWAYS_IGNITE to confirm it's the physics killing spread, not the RNG.
-        CaGrid grid = unburnedGrid(5, 5, 0.9f); // very wet
-        ignite(grid, 2, 2);
-        WindField wind = uniformWind(5, 5, 5.0f, 180.0f);
+    void suppressedFrontierCellIsNeverIgnited() {
+        // 3×3, centre BURNING. Suppress all frontier cells.
+        CaGrid grid = GridFactory.singleBurningCell(3, 3, 1, 1);
+        WindField wind = GridFactory.southerlyWind(3, 3, 10.0f);
 
-        engine.run(grid, wind, registry, 5, ALWAYS_IGNITE);
+        SuppressedZoneRegistry registry = new SuppressedZoneRegistry();
+        // Suppress all 8 neighbours
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                if (r == 1 && c == 1) continue;
+                registry.register(grid.encodeIndex(r, c),
+                        Instant.now().plusSeconds(3600));
+            }
+        }
 
-        int unburned = countCellsInState(grid, CellStateEnum.UNBURNED);
-        assertThat(unburned).isEqualTo(24);
+        engine.run(grid, wind, registry, 5, alwaysIgniteRng());
+
+        // No neighbour should have ignited
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                if (r == 1 && c == 1) continue;
+                assertThat(grid.getState(r, c))
+                        .as("Cell (%d,%d) must remain UNBURNED", r, c)
+                        .isEqualTo(CellStateEnum.UNBURNED);
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
-    // Suppression
+    // NON_COMBUSTIBLE cells are never ignited
     // -------------------------------------------------------------------------
 
     @Test
-    void suppressedCellDoesNotIgniteEvenWithAlwaysIgniteRng() {
-        CaGrid grid = unburnedGrid(3, 3, 0.2f);
-        ignite(grid, 1, 0);
-        WindField wind = calmWind(3, 3);
+    void nonCombustibleCellsAreNeverIgnited() {
+        // Surround the BURNING centre with NON_COMBUSTIBLE cells
+        CaGrid grid = GridFactory.unburnedFlat(3, 3);
+        grid.setState(1, 1, CellStateEnum.BURNING);
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                if (r == 1 && c == 1) continue;
+                grid.setState(r, c, CellStateEnum.NON_COMBUSTIBLE);
+                grid.environment[r][c] = GridFactory.water();
+            }
+        }
+        WindField wind = GridFactory.southerlyWind(3, 3, 10.0f);
 
-        // Suppress (1,1) for the next hour
-        long targetIdx = (long) 1 * 3 + 1; // row=1, col=1, cols=3
-        registry.register(targetIdx, Instant.now().plusSeconds(3600));
+        engine.run(grid, wind, emptyRegistry, 5, alwaysIgniteRng());
 
-        engine.run(grid, wind, registry, 3, ALWAYS_IGNITE);
-
-        // (1,1) must remain UNBURNED (suppressed) despite always-ignite RNG
-        assertThat(grid.states[1][1]).isEqualTo(CellStateEnum.UNBURNED.ordinal());
-    }
-
-    @Test
-    void expiredSuppressionAllowsIgnition() {
-        CaGrid grid = unburnedGrid(3, 3, 0.1f);
-        ignite(grid, 1, 0);
-        WindField wind = calmWind(3, 3);
-
-        // Expiry already in the past — suppression is inactive
-        long targetIdx = (long) 1 * 3 + 1;
-        registry.register(targetIdx, Instant.now().minusSeconds(1));
-
-        engine.run(grid, wind, registry, 2, ALWAYS_IGNITE);
-
-        // Should have spread normally
-        assertThat(grid.states[1][1]).isNotEqualTo(CellStateEnum.UNBURNED.ordinal());
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                if (r == 1 && c == 1) continue;
+                assertThat(grid.getState(r, c))
+                        .as("Cell (%d,%d) must stay NON_COMBUSTIBLE", r, c)
+                        .isEqualTo(CellStateEnum.NON_COMBUSTIBLE);
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
-    // Early termination
+    // Synchronous CA semantics: newly ignited cell does not spread in same gen
     // -------------------------------------------------------------------------
 
     @Test
-    void engineTerminatesEarlyWhenFrontierExhausted() {
-        // Tiny 3×3 grid, ALWAYS_IGNITE.  After enough steps everything is BURNED.
-        // Run for 20 steps — should stop well before that.
-        CaGrid grid = unburnedGrid(3, 3, 0.1f);
-        ignite(grid, 1, 1);
-        WindField wind = uniformWind(3, 3, 5.0f, 180.0f);
+    void newlyIgnitedCellDoesNotSpreadInSameGeneration() {
+        // 1×5 line: [UNBURNED, UNBURNED, BURNING, UNBURNED, UNBURNED]
+        // Gen 0: (0,1) ignites from (0,2). (0,3) must not ignite in same gen
+        // because (0,1) was still UNBURNED at the start of gen 0.
+        CaGrid grid = GridFactory.unburnedFlat(1, 5);
+        grid.setState(0, 2, CellStateEnum.BURNING);
+        WindField wind = GridFactory.calmWind(1, 5);
 
-        List<SimulationStepResult> results =
-                engine.run(grid, wind, registry, 20, ALWAYS_IGNITE);
+        // Run exactly 1 generation
+        engine.run(grid, wind, emptyRegistry, 1, alwaysIgniteRng());
 
-        assertThat(results.size()).isLessThan(20);
-        assertThat(countCellsInState(grid, CellStateEnum.UNBURNED)).isEqualTo(0);
+        // (0,2) must now be BURNED
+        assertThat(grid.getState(0, 2)).isEqualTo(CellStateEnum.BURNED);
+
+        // (0,3) may have been reached by (0,2)'s fire in gen 0 as a frontier cell,
+        // but it must NOT be BURNED yet (it can be BURNING at most — that's fine,
+        // it was a frontier cell of (0,2) which was BURNING at step start)
+        // The key assertion: (0,4) must still be UNBURNED after gen 0,
+        // because (0,3) had not yet started BURNING when gen 0 evaluated.
+        assertThat(grid.getState(0, 4)).isEqualTo(CellStateEnum.UNBURNED);
+    }
+
+    // -------------------------------------------------------------------------
+    // deepCopy independence — mutations do not affect original
+    // -------------------------------------------------------------------------
+
+    @Test
+    void runOnDeepCopyDoesNotMutateOriginal() {
+        CaGrid    original = GridFactory.singleBurningCell(5, 5, 2, 2);
+        CaGrid    copy     = original.deepCopy();
+        WindField wind     = GridFactory.southerlyWind(5, 5, 5.0f);
+
+        engine.run(copy, wind, emptyRegistry, 5, alwaysIgniteRng());
+
+        // Original centre should still be BURNING (engine didn't touch it)
+        assertThat(original.getState(2, 2)).isEqualTo(CellStateEnum.BURNING);
+        // Verify copy has progressed
+        assertThat(copy.getState(2, 2)).isEqualTo(CellStateEnum.BURNED);
+    }
+
+    // -------------------------------------------------------------------------
+    // Reproducibility: same seed → same result
+    // -------------------------------------------------------------------------
+
+    @Test
+    void sameRngSeedProducesSameResults() {
+        CaGrid    gridA = GridFactory.singleBurningCell(7, 7, 3, 3);
+        CaGrid    gridB = gridA.deepCopy();
+        WindField wind  = GridFactory.southerlyWind(7, 7, 4.0f);
+
+        List<SimulationStepResult> resultsA =
+                engine.run(gridA, wind, emptyRegistry, 8, new Random(42L));
+        List<SimulationStepResult> resultsB =
+                engine.run(gridB, wind, emptyRegistry, 8, new Random(42L));
+
+        assertThat(resultsA).hasSameSizeAs(resultsB);
+        for (int i = 0; i < resultsA.size(); i++) {
+            assertThat(resultsA.get(i).getNewlyIgnitedCells())
+                    .isEqualTo(resultsB.get(i).getNewlyIgnitedCells());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /** RNG that always returns 0.0 — every probabilistic roll succeeds. */
+    private static Random alwaysIgniteRng() {
+        return new Random() {
+            @Override public double nextDouble() { return 0.0; }
+        };
+    }
+
+    /** Standard seeded RNG for reproducibility tests. */
+    private static Random deterministicRng(long seed) {
+        return new Random(seed);
     }
 }

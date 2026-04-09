@@ -158,7 +158,7 @@ class GridInitialiserServiceTest {
         // NDMI is scaled: 0.03 + (0.31 − (−0.1)) * 0.35 = 0.1735
         assertThat(result.getGrid().environment[0][0].getNdmi()).isEqualTo(0.1735f, within(1e-4f));
     }
-    
+
     @Test
     void slopeIsConvertedFromDegreesToRadians() {
         GridBands bands = bandsWithSlope(1, 1, 100.0, 45.0f);
@@ -167,6 +167,15 @@ class GridInitialiserServiceTest {
         float expected = (float) Math.toRadians(45.0);
         assertThat(result.getGrid().environment[0][0].getSlopeRadians())
                 .isEqualTo(expected, within(1e-5f));
+    }
+
+    @Test
+    void elevationIsForwardedFromBands() {
+        GridBands bands = bandsWithElevation(1, 1, 100.0, 2450.0f);
+        GridInitResult result = service.build(bands, new int[][]{{ EsaBandLayout.CODE_GRASSLAND }}, emptyRoads());
+
+        assertThat(result.getGrid().environment[0][0].getElevationMetres())
+                .isEqualTo(2450.0f, within(0.1f));
     }
 
     @Test
@@ -250,7 +259,6 @@ class GridInitialiserServiceTest {
             for (int c = 0; c < 2; c++)
                 assertThat(prox[r][c]).isEqualTo(Float.MAX_VALUE);
     }
-// TODO: Revive this test
 
 //    @Test
 //    void roadAtCellCentre_proximityIsZero() {
@@ -341,6 +349,15 @@ class GridInitialiserServiceTest {
         return new GridBands(
                 filled(rows, cols, 0.5f), filled(rows, cols, 0.2f), filled(rows, cols, 1000f),
                 filled(rows, cols, slopeDeg), filled(rows, cols, 0.8f),
+                rows, cols, cellSize,
+                0, -(rows * cellSize), cols * cellSize, 0);
+    }
+
+    private GridBands bandsWithElevation(int rows, int cols, double cellSize, float elevM) {
+        return new GridBands(
+                filled(rows, cols, 0.5f), filled(rows, cols, 0.2f),
+                filled(rows, cols, elevM),
+                filled(rows, cols, 5.0f), filled(rows, cols, 0.8f),
                 rows, cols, cellSize,
                 0, -(rows * cellSize), cols * cellSize, 0);
     }

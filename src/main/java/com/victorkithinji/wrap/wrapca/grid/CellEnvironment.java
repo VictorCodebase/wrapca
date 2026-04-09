@@ -18,9 +18,10 @@ import lombok.Value;
  *   CellEnvironment env = new CellEnvironment(
  *       0.65f,           // ndvi
  *       0.40f,           // ndmi
+ *       1850.0f,         // elevationMetres
  *       0.174533f,       // slopeRadians  (~10°)
  *       1.5707963f,      // aspectRadians (~90° East)
- *       VegetationType.AFROMONTANE_FOREST
+ *       VegetationTypeEnum.AFROMONTANE_FOREST
  *   );
  * }</pre>
  */
@@ -48,6 +49,18 @@ public class CellEnvironment {
      * probability. Refreshed for UNBURNED cells at each CV correction step.
      */
     float ndmi;
+
+    /**
+     * Terrain elevation above sea level in <strong>metres</strong>.
+     *
+     * <p>Sourced from the Copernicus DEM GLO-30 (30 m) resampled to the
+     * CA grid resolution by {@code ingestion.RasterResamplerService}.
+     * Stored here so that {@code simulation.IgnitionProbabilityResolver}
+     * can call {@code rothermel.SlopeEffectCalculator.slopeAngleRadians()}
+     * directly with source and target elevations rather than approximating
+     * slope via the aspect-projection workaround (DEV-006 — closed).
+     */
+    float elevationMetres;
 
     /**
      * Terrain slope magnitude in <strong>radians</strong>, range [0, π/2].

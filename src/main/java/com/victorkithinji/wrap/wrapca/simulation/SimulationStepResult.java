@@ -3,25 +3,25 @@ package com.victorkithinji.wrap.wrapca.simulation;
 import lombok.Value;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.Set;
 
 /**
- * Immutable record of the outcome of one CA generation step.
+ * Immutable snapshot of one CA generation step.
+ * Collected into List<SimulationStepResult> by CaSpreadEngine and handed to output assembly.
  *
- * Produced by CaSpreadEngine after each generation and collected into a
- * List<SimulationStepResult> for later assembly into API response DTOs.
- *
- * Fields:
- *   newlyIgnitedCells  – encoded indices (row * cols + col) of cells that
- *                        transitioned UNBURNED → BURNING this generation.
- *   generation         – zero-based generation counter.
- *   timestamp          – wall-clock instant at which this step completed;
- *                        used for time-stamped perimeter snapshots in Phase 2.
+ * generation values are zero-based and sequential — list index == generation number.
+ * newlyIgnitedCells is unmodifiable.
  */
 @Value
 public class SimulationStepResult {
-
     Set<Long> newlyIgnitedCells;
     int       generation;
     Instant   timestamp;
+
+    public SimulationStepResult(Set<Long> newlyIgnitedCells, int generation, Instant timestamp) {
+        this.newlyIgnitedCells = Collections.unmodifiableSet(newlyIgnitedCells);
+        this.generation        = generation;
+        this.timestamp         = timestamp;
+    }
 }

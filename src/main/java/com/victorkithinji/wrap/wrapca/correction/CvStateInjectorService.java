@@ -14,13 +14,13 @@ import java.util.Map;
 
 /**
  * Applies a CV observation layer to a running CaGrid at each satellite overpass.
- * <br/><br/>
+ *
  * Three hard state overrides are applied in order:
  *   1. Confirmed BURNED cells are forced to BURNED regardless of simulation state.
  *   2. Suppressed zone cells are registered in SuppressedZoneRegistry and their
  *      grid state is forced to NON_COMBUSTIBLE for the suppression window duration.
  *   3. NDMI values are refreshed for UNBURNED cells from the latest Sentinel-2 observation.
- *<br/><br/>
+ *
  * These are authoritative overrides, not probabilistic adjustments. The CA resumes
  * propagation from the corrected state after this service returns.
  */
@@ -133,6 +133,7 @@ public class CvStateInjectorService {
             grid.environment[row][col] = new CellEnvironment(
                     existing.getNdvi(),
                     newNdmi,
+                    existing.getElevationMetres(),
                     existing.getSlopeRadians(),
                     existing.getAspectRadians(),
                     existing.getVegetationType()

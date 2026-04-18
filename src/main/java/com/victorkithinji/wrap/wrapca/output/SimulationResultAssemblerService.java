@@ -1,8 +1,8 @@
 package com.victorkithinji.wrap.wrapca.output;
 
-import com.victorkithinji.wrap.wrapca.dto.response.PhaseOneResultResponse;
-import com.victorkithinji.wrap.wrapca.dto.response.PhaseTwoResultResponse;
-import com.victorkithinji.wrap.wrapca.dto.response.PerimeterSnapshot;
+import com.victorkithinji.wrap.wrapca.dto.response.PhaseOneResultResponseDto;
+import com.victorkithinji.wrap.wrapca.dto.response.PhaseTwoResultResponseDto;
+import com.victorkithinji.wrap.wrapca.dto.response.PerimeterSnapshotDto;
 import com.victorkithinji.wrap.wrapca.grid.CaGrid;
 import com.victorkithinji.wrap.wrapca.simulation.SimulationStepResult;
 import lombok.RequiredArgsConstructor;
@@ -31,9 +31,9 @@ public class SimulationResultAssemblerService {
 	 * @param grid                  The grid used for this run — read-only here.
 	 * @param damagePotentialValues Normalised burn-frequency values, one per cell, row-major.
 	 * @param ignitionProbValues    Normalised I(c) values, one per cell, row-major.
-	 * @return Populated {@link PhaseOneResultResponse}.
+	 * @return Populated {@link PhaseOneResultResponseDto}.
 	 */
-	public PhaseOneResultResponse assemblePhaseOne(
+	public PhaseOneResultResponseDto assemblePhaseOne(
 		String runId,
 		CaGrid grid,
 		float[] damagePotentialValues,
@@ -52,7 +52,7 @@ public class SimulationResultAssemblerService {
 
 		int[] vegetationTypeOrdinals = extractVegetationOrdinals(grid);
 
-		return new PhaseOneResultResponse(
+		return new PhaseOneResultResponseDto(
 			runId,
 			damagePotentialValues,
 			ignitionProbValues,
@@ -68,27 +68,27 @@ public class SimulationResultAssemblerService {
 	 * @param runId Unique identifier for this run.
 	 * @param grid  The grid in its final state after all generations.
 	 * @param steps Ordered list of step results from {@code CaSpreadEngine.run()}.
-	 * @return Populated {@link PhaseTwoResultResponse}.
+	 * @return Populated {@link PhaseTwoResultResponseDto}.
 	 */
-	public PhaseTwoResultResponse assemblePhaseTwo(
+	public PhaseTwoResultResponseDto assemblePhaseTwo(
 		String runId,
 		CaGrid grid,
 		List<SimulationStepResult> steps) {
 
-		List<PerimeterSnapshot> snapshots = new ArrayList<>();
+		List<PerimeterSnapshotDto> snapshots = new ArrayList<>();
 
 		for (SimulationStepResult step : steps) {
 			if (step.getNewlyIgnitedCells().isEmpty()) {
 				continue;
 			}
 			String geoJson = perimeterExtractor.extract(grid, step.getTimestamp());
-			snapshots.add(new PerimeterSnapshot(geoJson, step.getTimestamp().toString()));
+			snapshots.add(new PerimeterSnapshotDto(geoJson, step.getTimestamp().toString()));
 		}
 
 		log.debug("Phase 2 result assembled: runId={}, generations={}, snapshots={}",
 			runId, steps.size(), snapshots.size());
 
-		return new PhaseTwoResultResponse(runId, snapshots);
+		return new PhaseTwoResultResponseDto(runId, snapshots);
 	}
 
 	// --- private helpers ---

@@ -8,10 +8,9 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "wrap.simulation")
 @Data
 public class SimulationConfig {
-
-    private double cellSizeMetres;
-    private int timeStepMinutes;
-    private int monteCarloRuns;
-    private int threadPoolSize;
-    private int phase1HorizonHours;
+	private double cellSizeMetres;
+	private int timeStepMinutes;
+	private int monteCarloRuns;
+	private int threadPoolSize;
+	private int phase1HorizonHours;
 }

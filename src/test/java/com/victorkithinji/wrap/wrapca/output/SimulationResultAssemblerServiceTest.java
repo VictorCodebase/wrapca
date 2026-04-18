@@ -1,7 +1,7 @@
 package com.victorkithinji.wrap.wrapca.output;
 
-import com.victorkithinji.wrap.wrapca.dto.response.PhaseOneResultResponse;
-import com.victorkithinji.wrap.wrapca.dto.response.PhaseTwoResultResponse;
+import com.victorkithinji.wrap.wrapca.dto.response.PhaseOneResultResponseDto;
+import com.victorkithinji.wrap.wrapca.dto.response.PhaseTwoResultResponseDto;
 import com.victorkithinji.wrap.wrapca.grid.CaGrid;
 import com.victorkithinji.wrap.wrapca.grid.CellStateEnum;
 import com.victorkithinji.wrap.wrapca.grid.VegetationTypeEnum;
@@ -68,7 +68,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = new float[4];
 			float[] ip = new float[4];
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne("my-run-xyz", grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne("my-run-xyz", grid, dp, ip);
 
 			assertThat(response.getRunId()).isEqualTo("my-run-xyz");
 		}
@@ -80,7 +80,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = new float[21];
 			float[] ip = new float[21];
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 
 			assertThat(response.getRows()).isEqualTo(3);
 			assertThat(response.getCols()).isEqualTo(7);
@@ -93,7 +93,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = {0.1f, 0.2f, 0.3f, 0.4f};
 			float[] ip = new float[4];
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 
 			assertThat(response.getDamagePotentialValues()).isSameAs(dp);
 		}
@@ -105,7 +105,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = new float[4];
 			float[] ip = {0.9f, 0.8f, 0.7f, 0.6f};
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 
 			assertThat(response.getIgnitionProbabilityValues()).isSameAs(ip);
 		}
@@ -117,7 +117,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = new float[24];
 			float[] ip = new float[24];
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 
 			assertThat(response.getVegetationTypeOrdinals()).hasSize(24);
 		}
@@ -135,7 +135,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = new float[4];
 			float[] ip = new float[4];
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 			int[] ordinals = response.getVegetationTypeOrdinals();
 
 			assertThat(ordinals[0]).isEqualTo(VegetationTypeEnum.AFROMONTANE_FOREST.ordinal());
@@ -151,7 +151,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = new float[9];
 			float[] ip = new float[9];
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 			int[] ordinals = response.getVegetationTypeOrdinals();
 
 			assertThat(ordinals).containsOnly(VegetationTypeEnum.SHRUBLAND.ordinal());
@@ -166,7 +166,7 @@ class SimulationResultAssemblerServiceTest {
 				float[] dp = new float[1];
 				float[] ip = new float[1];
 
-				PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+				PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 
 				assertThat(response.getVegetationTypeOrdinals()[0])
 					.as("ordinal for %s", veg)
@@ -203,7 +203,7 @@ class SimulationResultAssemblerServiceTest {
 			float[] dp = new float[1];
 			float[] ip = new float[1];
 
-			PhaseOneResultResponse response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
+			PhaseOneResultResponseDto response = assembler.assemblePhaseOne(RUN_ID, grid, dp, ip);
 
 			assertThat(response.getVegetationTypeOrdinals()).hasSize(1);
 			assertThat(response.getVegetationTypeOrdinals()[0]).isEqualTo(VegetationTypeEnum.WATER.ordinal());
@@ -222,7 +222,7 @@ class SimulationResultAssemblerServiceTest {
 		@DisplayName("runId is propagated to the response")
 		void runId_propagated() {
 			CaGrid grid = GridTestFactory.allUnburned(2, 2);
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo("phase2-run", grid, List.of());
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo("phase2-run", grid, List.of());
 			assertThat(response.getRunId()).isEqualTo("phase2-run");
 		}
 
@@ -230,7 +230,7 @@ class SimulationResultAssemblerServiceTest {
 		@DisplayName("empty step list produces empty snapshots list")
 		void emptyStepList_emptySnapshots() {
 			CaGrid grid = GridTestFactory.allUnburned(3, 3);
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of());
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of());
 			assertThat(response.getPerimetersByTimestamp()).isEmpty();
 			verifyNoInteractions(perimeterExtractor);
 		}
@@ -241,7 +241,7 @@ class SimulationResultAssemblerServiceTest {
 			CaGrid grid = GridTestFactory.allUnburned(3, 3);
 			SimulationStepResult emptyStep = stepWithNoIgnitions(0, T0);
 
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(emptyStep));
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(emptyStep));
 
 			assertThat(response.getPerimetersByTimestamp()).isEmpty();
 			verifyNoInteractions(perimeterExtractor);
@@ -254,7 +254,7 @@ class SimulationResultAssemblerServiceTest {
 			when(perimeterExtractor.extract(eq(grid), any())).thenReturn(STUB_GEOJSON);
 
 			SimulationStepResult activeStep = stepWithIgnitions(0, T0, Set.of(4L));
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(activeStep));
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(activeStep));
 
 			assertThat(response.getPerimetersByTimestamp()).hasSize(1);
 		}
@@ -266,7 +266,7 @@ class SimulationResultAssemblerServiceTest {
 			when(perimeterExtractor.extract(eq(grid), any())).thenReturn(STUB_GEOJSON);
 
 			SimulationStepResult activeStep = stepWithIgnitions(0, T0, Set.of(4L));
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(activeStep));
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(activeStep));
 
 			assertThat(response.getPerimetersByTimestamp().get(0).getPerimeterGeoJson())
 				.isEqualTo(STUB_GEOJSON);
@@ -279,7 +279,7 @@ class SimulationResultAssemblerServiceTest {
 			when(perimeterExtractor.extract(any(), any())).thenReturn(STUB_GEOJSON);
 
 			SimulationStepResult activeStep = stepWithIgnitions(0, T0, Set.of(4L));
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(activeStep));
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, List.of(activeStep));
 
 			assertThat(response.getPerimetersByTimestamp().get(0).getIsoTimestamp())
 				.isEqualTo(T0.toString());
@@ -301,7 +301,7 @@ class SimulationResultAssemblerServiceTest {
 				stepWithIgnitions(2, t3, Set.of(3L))    // active
 			);
 
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, steps);
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, steps);
 
 			assertThat(response.getPerimetersByTimestamp()).hasSize(2);
 			verify(perimeterExtractor, times(2)).extract(any(), any());
@@ -326,7 +326,7 @@ class SimulationResultAssemblerServiceTest {
 				stepWithIgnitions(1, t2, Set.of(2L))
 			);
 
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, steps);
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, steps);
 
 			assertThat(response.getPerimetersByTimestamp().get(0).getPerimeterGeoJson()).isEqualTo(geoJson1);
 			assertThat(response.getPerimetersByTimestamp().get(1).getPerimeterGeoJson()).isEqualTo(geoJson2);
@@ -354,7 +354,7 @@ class SimulationResultAssemblerServiceTest {
 				stepWithNoIgnitions(2, T0.plusSeconds(600))
 			);
 
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(RUN_ID, grid, steps);
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(RUN_ID, grid, steps);
 
 			assertThat(response.getPerimetersByTimestamp()).isEmpty();
 			verifyNoInteractions(perimeterExtractor);
@@ -366,7 +366,7 @@ class SimulationResultAssemblerServiceTest {
 			CaGrid grid = GridTestFactory.withStateAt(2, 2, 0, 0, CellStateEnum.BURNING);
 			when(perimeterExtractor.extract(any(), any())).thenReturn(STUB_GEOJSON);
 
-			PhaseTwoResultResponse response = assembler.assemblePhaseTwo(
+			PhaseTwoResultResponseDto response = assembler.assemblePhaseTwo(
 				RUN_ID, grid, List.of(stepWithIgnitions(0, T0, Set.of(0L))));
 
 			assertThat(response.getPerimetersByTimestamp()).hasSize(1);

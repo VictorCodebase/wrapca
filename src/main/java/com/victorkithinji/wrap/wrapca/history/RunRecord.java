@@ -1,5 +1,6 @@
 package com.victorkithinji.wrap.wrapca.history;
 
+import com.victorkithinji.wrap.wrapca.dto.SimulationModeEnum;
 import lombok.Value;
 
 import java.time.Instant;
@@ -24,7 +25,7 @@ public class RunRecord {
 	/**
 	 * Whether this was a PRE_FIRE (Phase 1) or ACTIVE_FIRE (Phase 2) run.
 	 */
-	SimulationPhaseEnum phase;
+	SimulationModeEnum phase;
 
 	/**
 	 * Wall-clock time the run started.

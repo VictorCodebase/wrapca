@@ -4,6 +4,7 @@ import com.victorkithinji.wrap.wrapca.dto.response.SessionStatusResponseDto;
 import com.victorkithinji.wrap.wrapca.facade.WrapSessionFacade;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,23 +25,33 @@ public class GridController {
 
 	/**
 	 * GET /api/session/status
-	 * Returns the current session mode, grid dimensions, bounding box, and run history summary.
+	 * Returns 200 with session data when the grid is ready.
+	 * Returns 503 with a plain message when the grid has not yet loaded.
 	 */
 	@GetMapping("/status")
-	public ResponseEntity<SessionStatusResponseDto> status() {
-		return ResponseEntity.ok(facade.getSessionStatus());
+	public ResponseEntity<?> status() {
+		try {
+			return ResponseEntity.ok(facade.getSessionStatus());
+		} catch (IllegalStateException e) {
+			return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+				.body(e.getMessage());
+		}
 	}
 
 	/**
 	 * POST /api/session/refresh
-	 * Triggers an immediate full session reload: re-fetches CV GeoTIFF,
-	 * rebuilds the grid, and re-polls for fire mode. Same pipeline as the
-	 * scheduled 3-hour refresh. Returns the updated status.
+	 * Triggers an immediate full session reload. Returns 200 with status
+	 * when the grid loaded successfully, or 503 when data is still unavailable.
 	 */
 	@PostMapping("/refresh")
-	public ResponseEntity<SessionStatusResponseDto> refresh() {
+	public ResponseEntity<?> refresh() {
 		log.info("Manual session refresh requested via API");
 		facade.refreshSession();
-		return ResponseEntity.ok(facade.getSessionStatus());
+		try {
+			return ResponseEntity.ok(facade.getSessionStatus());
+		} catch (IllegalStateException e) {
+			return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+				.body(e.getMessage());
+		}
 	}
 }

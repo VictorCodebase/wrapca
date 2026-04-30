@@ -10,12 +10,14 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * Checks the local cache directory for a GeoTIFF file matching today's date
  * before triggering a re-fetch from the CV module.
- *
+ * <p>
  * Cache filename convention: cv_fuel_state_YYYY-MM-DD.tif
  * This convention should be confirmed with the CV team — it is the only
  * coupling point between this service and their output naming.
@@ -24,149 +26,196 @@ import java.util.Optional;
 @Service
 public class IngestionCacheService {
 
-    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
-    private static final String CACHE_FILENAME_PREFIX = "cv_fuel_state_";
-    private static final String CACHE_FILENAME_SUFFIX = ".tif";
+	private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
+	private static final String CACHE_FILENAME_PREFIX = "cv_fuel_state_";
+	private static final String CACHE_FILENAME_SUFFIX = ".tif";
 
-    // ESA and road caches are existence-only — these files are static products
-    // that do not change between runs and have no expiry date.
-    private static final String ESA_CACHE_FILENAME  = "esa_worldcover.tif";
-    private static final String ROAD_CACHE_FILENAME = "osm_roads.geojson";
+	// ESA and road caches are existence-only — these files are static products
+	// that do not change between runs and have no expiry date.
+	private static final String ESA_CACHE_FILENAME = "esa_worldcover.tif";
+	private static final String ROAD_CACHE_FILENAME = "osm_roads.geojson";
 
-    private final Path cacheDirectory;
+	private final Path cacheDirectory;
 
-    public IngestionCacheService(@Value("${wrap.data.root}") String dataRoot) {
-        this.cacheDirectory = Paths.get(dataRoot, "cache");
-    }
+	public IngestionCacheService(@Value("${wrap.data.root}") String dataRoot) {
+		this.cacheDirectory = Paths.get(dataRoot, "cache");
+	}
 
-    /**
-     * Returns the cached GeoTIFF path for today if it exists, otherwise empty.
-     * The caller is responsible for fetching and storing a new file when empty
-     * is returned.
-     */
-    public Optional<Path> getCachedFuelState() {
-        return getCachedFuelStateForDate(LocalDate.now());
-    }
+	/**
+	 * Returns the cached GeoTIFF path for today if it exists, otherwise empty.
+	 * The caller is responsible for fetching and storing a new file when empty
+	 * is returned.
+	 */
+	public Optional<Path> getCachedFuelState() {
+		return getCachedFuelStateForDate(LocalDate.now());
+	}
 
-    /**
-     * Package-private overload for testing with a specific date.
-     */
-    Optional<Path> getCachedFuelStateForDate(LocalDate date) {
-        ensureCacheDirectoryExists();
-        Path candidate = cacheDirectory.resolve(buildFilename(date));
-        if (Files.exists(candidate)) {
-            log.info("Cache hit: using existing fuel state file {}", candidate);
-            return Optional.of(candidate);
-        }
-        log.info("Cache miss for date {}: no file at {}", date, candidate);
-        return Optional.empty();
-    }
+	/**
+	 * Package-private overload for testing with a specific date.
+	 */
+	Optional<Path> getCachedFuelStateForDate(LocalDate date) {
+		ensureCacheDirectoryExists();
+		Path candidate = cacheDirectory.resolve(buildFilename(date));
+		if (Files.exists(candidate)) {
+			log.info("Cache hit: using existing fuel state file {}", candidate);
+			return Optional.of(candidate);
+		}
+		log.info("Cache miss for date {}: no file at {}", date, candidate);
+		return Optional.empty();
+	}
 
-    /**
-     * Stores a downloaded GeoTIFF into the cache directory under today's
-     * date-stamped filename, then returns the stored path.
-     *
-     * @param sourceBytes raw GeoTIFF bytes received from CV module
-     * @return path of the written cache file
-     * @throws IOException if the write fails
-     */
-    public Path storeFuelState(byte[] sourceBytes) throws IOException {
-        return storeFuelStateForDate(sourceBytes, LocalDate.now());
-    }
+	/**
+	 * Stores a downloaded GeoTIFF into the cache directory under today's
+	 * date-stamped filename, then returns the stored path.
+	 *
+	 * @param sourceBytes raw GeoTIFF bytes received from CV module
+	 * @return path of the written cache file
+	 * @throws IOException if the write fails
+	 */
+	public Path storeFuelState(byte[] sourceBytes) throws IOException {
+		return storeFuelStateForDate(sourceBytes, LocalDate.now());
+	}
 
-    /**
-     * Package-private overload for testing with a specific date.
-     */
-    Path storeFuelStateForDate(byte[] sourceBytes, LocalDate date) throws IOException {
-        ensureCacheDirectoryExists();
-        Path target = cacheDirectory.resolve(buildFilename(date));
-        Files.write(target, sourceBytes);
-        log.info("Stored {} bytes to cache file {}", sourceBytes.length, target);
-        return target;
-    }
+	/**
+	 * Package-private overload for testing with a specific date.
+	 */
+	Path storeFuelStateForDate(byte[] sourceBytes, LocalDate date) throws IOException {
+		ensureCacheDirectoryExists();
+		Path target = cacheDirectory.resolve(buildFilename(date));
+		Files.write(target, sourceBytes);
+		log.info("Stored {} bytes to cache file {}", sourceBytes.length, target);
+		return target;
+	}
 
-    /**
-     * Returns the expected cache path for today without checking if it exists.
-     * Used by CvApiClient to know where to write a freshly downloaded file.
-     */
-    public Path expectedPathForToday() {
-        ensureCacheDirectoryExists();
-        return cacheDirectory.resolve(buildFilename(LocalDate.now()));
-    }
+	/**
+	 * Returns the expected cache path for today without checking if it exists.
+	 * Used by CvApiClient to know where to write a freshly downloaded file.
+	 */
+	public Path expectedPathForToday() {
+		ensureCacheDirectoryExists();
+		return cacheDirectory.resolve(buildFilename(LocalDate.now()));
+	}
 
-    // ─── ESA WorldCover cache (existence-only, never expires) ───────────────────
+	// ─── ESA WorldCover cache (existence-only, never expires) ───────────────────
 
-    /**
-     * Returns the cached ESA WorldCover GeoTIFF if it exists, otherwise empty.
-     * The ESA file is a static product — once cached it is never re-fetched.
-     */
-    public Optional<Path> getCachedEsaLayer() {
-        ensureCacheDirectoryExists();
-        Path candidate = cacheDirectory.resolve(ESA_CACHE_FILENAME);
-        if (Files.exists(candidate)) {
-            log.info("ESA cache hit: {}", candidate);
-            return Optional.of(candidate);
-        }
-        log.info("ESA cache miss: no file at {}", candidate);
-        return Optional.empty();
-    }
+	/**
+	 * Returns the cached ESA WorldCover GeoTIFF if it exists, otherwise empty.
+	 * The ESA file is a static product — once cached it is never re-fetched.
+	 */
+	public Optional<Path> getCachedEsaLayer() {
+		ensureCacheDirectoryExists();
+		Path candidate = cacheDirectory.resolve(ESA_CACHE_FILENAME);
+		if (Files.exists(candidate)) {
+			log.info("ESA cache hit: {}", candidate);
+			return Optional.of(candidate);
+		}
+		log.info("ESA cache miss: no file at {}", candidate);
+		return Optional.empty();
+	}
 
-    /**
-     * Stores ESA WorldCover GeoTIFF bytes to the cache and returns the written path.
-     *
-     * @param bytes raw GeoTIFF bytes
-     * @return path of the written cache file
-     * @throws IOException if the write fails
-     */
-    public Path storeEsaLayer(byte[] bytes) throws IOException {
-        ensureCacheDirectoryExists();
-        Path target = cacheDirectory.resolve(ESA_CACHE_FILENAME);
-        Files.write(target, bytes);
-        log.info("Stored ESA WorldCover GeoTIFF: {} bytes → {}", bytes.length, target);
-        return target;
-    }
+	/**
+	 * Stores ESA WorldCover GeoTIFF bytes to the cache and returns the written path.
+	 *
+	 * @param bytes raw GeoTIFF bytes
+	 * @return path of the written cache file
+	 * @throws IOException if the write fails
+	 */
+	public Path storeEsaLayer(byte[] bytes) throws IOException {
+		ensureCacheDirectoryExists();
+		Path target = cacheDirectory.resolve(ESA_CACHE_FILENAME);
+		Files.write(target, bytes);
+		log.info("Stored ESA WorldCover GeoTIFF: {} bytes → {}", bytes.length, target);
+		return target;
+	}
 
-    // ─── OSM road cache (existence-only, never expires) ──────────────────────
+	// ─── OSM road cache (existence-only, never expires) ──────────────────────
 
-    /**
-     * Returns the cached OSM road GeoJSON path if it exists, otherwise empty.
-     * Road geometry is a static product — once cached it is never re-fetched.
-     */
-    public Optional<Path> getCachedRoadLayer() {
-        ensureCacheDirectoryExists();
-        Path candidate = cacheDirectory.resolve(ROAD_CACHE_FILENAME);
-        if (Files.exists(candidate)) {
-            log.info("Road cache hit: {}", candidate);
-            return Optional.of(candidate);
-        }
-        log.info("Road cache miss: no file at {}", candidate);
-        return Optional.empty();
-    }
+	/**
+	 * Returns the cached OSM road GeoJSON path if it exists, otherwise empty.
+	 * Road geometry is a static product — once cached it is never re-fetched.
+	 */
+	public Optional<Path> getCachedRoadLayer() {
+		ensureCacheDirectoryExists();
+		Path candidate = cacheDirectory.resolve(ROAD_CACHE_FILENAME);
+		if (Files.exists(candidate)) {
+			log.info("Road cache hit: {}", candidate);
+			return Optional.of(candidate);
+		}
+		log.info("Road cache miss: no file at {}", candidate);
+		return Optional.empty();
+	}
 
-    /**
-     * Stores OSM road GeoJSON to the cache and returns the written path.
-     *
-     * @param geojson GeoJSON string of road linestrings
-     * @return path of the written cache file
-     * @throws IOException if the write fails
-     */
-    public Path storeRoadLayer(String geojson) throws IOException {
-        ensureCacheDirectoryExists();
-        Path target = cacheDirectory.resolve(ROAD_CACHE_FILENAME);
-        Files.writeString(target, geojson);
-        log.info("Stored OSM road layer: {} chars → {}", geojson.length(), target);
-        return target;
-    }
+	/**
+	 * Stores OSM road GeoJSON to the cache and returns the written path.
+	 *
+	 * @param geojson GeoJSON string of road linestrings
+	 * @return path of the written cache file
+	 * @throws IOException if the write fails
+	 */
+	public Path storeRoadLayer(String geojson) throws IOException {
+		ensureCacheDirectoryExists();
+		Path target = cacheDirectory.resolve(ROAD_CACHE_FILENAME);
+		Files.writeString(target, geojson);
+		log.info("Stored OSM road layer: {} chars → {}", geojson.length(), target);
+		return target;
+	}
 
-    private String buildFilename(LocalDate date) {
-        return CACHE_FILENAME_PREFIX + date.format(DATE_FORMAT) + CACHE_FILENAME_SUFFIX;
-    }
+	private String buildFilename(LocalDate date) {
+		return CACHE_FILENAME_PREFIX + date.format(DATE_FORMAT) + CACHE_FILENAME_SUFFIX;
+	}
 
-    private void ensureCacheDirectoryExists() {
-        try {
-            Files.createDirectories(cacheDirectory);
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot create cache directory: " + cacheDirectory, e);
-        }
-    }
+	private void ensureCacheDirectoryExists() {
+		try {
+			Files.createDirectories(cacheDirectory);
+		} catch (IOException e) {
+			throw new IllegalStateException("Cannot create cache directory: " + cacheDirectory, e);
+		}
+	}
+
+
+// NOTE: the imports above are already present in IngestionCacheService.
+// Only the method body below needs to be added — do not duplicate imports
+// or the class/field declarations.
+
+	/**
+	 * Returns the most recently dated cv_fuel_state_*.tif in the cache directory,
+	 * regardless of whether it matches today's date.
+	 * <p>
+	 * Used by CvApiClient as a fallback when:
+	 * - CV is unreachable (network failure, CV module not running)
+	 * - stub-mode=true and no today's cache file exists yet
+	 * - The server restarts on a day when no fresh download has occurred
+	 * <p>
+	 * File selection: sorts by filename descending (YYYY-MM-DD lexicographic order
+	 * is identical to chronological order) and returns the first match.
+	 * <p>
+	 * Returns Optional.empty() when the cache directory does not exist or
+	 * contains no matching files. Never throws.
+	 */
+	public Optional<Path> getLatestCachedFuelState() {
+		Path cacheDir = cacheDirectory; // use whatever field/method the class already uses
+		if (!Files.isDirectory(cacheDir)) {
+			log.warn("IngestionCacheService: cache directory does not exist — {}",
+				cacheDir.toAbsolutePath());
+			return Optional.empty();
+		}
+
+		try (Stream<Path> files = Files.list(cacheDir)) {
+			return files
+				.filter(p -> {
+					String name = p.getFileName().toString();
+					return name.startsWith("cv_fuel_state_") && name.endsWith(".tif");
+				})
+				.max(Comparator.comparing(p -> p.getFileName().toString()))
+				.map(p -> {
+					log.debug("IngestionCacheService: latest cached fuel state — {}", p);
+					return p;
+				});
+		} catch (IOException e) {
+			log.warn("IngestionCacheService: failed to list cache directory ({}) — {}",
+				cacheDir, e.getMessage());
+			return Optional.empty();
+		}
+	}
+
 }

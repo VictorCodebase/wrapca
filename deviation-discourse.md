@@ -117,3 +117,48 @@ a requirement, add `wrap.simulation.master-seed` to `application.properties` and
 `SimulationConfig`. The interface requires no other changes.
 
 **Groups affected:** 12 only.
+
+## DEV-009 — CvApiClient fuel-state resolution changed from single-source to prioritised fallback chain
+
+**What changed:** `CvApiClient.fetchLatestFuelState()` previously had two states:
+stub-mode (return empty) or live (download from CV, return empty on failure). There
+was no fallback to previously cached data and no way to provide local test files
+without renaming them to match today's date.
+
+The method now works through a four-step resolution chain:
+
+1. Today's cache file — unchanged behaviour when CV has been polled today
+2. CV HTTP download — unchanged behaviour when CV is reachable and stub-mode=false
+3. Latest file in cache (any date) — new fallback for CV downtime or restarts
+4. Local override file at `wrap.cv.local-geotiff-path` — new development path
+
+stub-mode=true now skips only step 2 (HTTP call). Steps 1, 3, and 4 execute
+regardless of stub mode, so local and cached files are always honoured.
+
+A new property `wrap.cv.local-geotiff-path` is added. It is optional (empty default)
+and ignored when blank or pointing to a non-existent file.
+
+**Why:** Four concrete problems with the original design:
+
+1. CV downtime caused the grid to stay uninitialised on every refresh cycle,
+   even when a perfectly valid file from the previous poll was sitting in cache.
+2. Development with stub-mode=true required manually renaming test files to
+   `cv_fuel_state_YYYY-MM-DD.tif` every day — error-prone and undocumented.
+3. HTTP failures and missing files were not logged with the actual URL or path
+   being attempted, making diagnosis slow.
+4. `fetchLatestFuelState()` returning `Optional.empty()` was treated as a hard
+   failure in `WrapSessionFacade`, producing ERROR logs on every startup and every
+   3-hour scheduled refresh in any environment without live CV.
+
+**New method added to IngestionCacheService (Group 4):**
+`getLatestCachedFuelState()` — scans the cache directory for any
+`cv_fuel_state_*.tif` file and returns the most recently dated one. Filename
+sort is sufficient because YYYY-MM-DD is lexicographically identical to
+chronological order.
+
+**Groups affected:**
+
+- 4.5 (cvintegration — `CvApiClient` rewritten)
+- 4 (ingestion — `IngestionCacheService` gains `getLatestCachedFuelState()`)
+- 12 (facade — `loadGridFromSources` already changed in DEV-007/008 to warn-and-return;
+  no further change needed since `CvApiClient` now handles its own fallback)

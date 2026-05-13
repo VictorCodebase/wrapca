@@ -7,8 +7,10 @@ import com.victorkithinji.wrap.wrapca.cvintegration.CvApiClient;
 import com.victorkithinji.wrap.wrapca.cvintegration.FirePerimeterData;
 import com.victorkithinji.wrap.wrapca.dto.SimulationModeEnum;
 import com.victorkithinji.wrap.wrapca.dto.request.CvCorrectionRequestDto;
+import com.victorkithinji.wrap.wrapca.dto.request.ModeOverrideRequestDto;
 import com.victorkithinji.wrap.wrapca.dto.request.PhaseOneRunRequestDto;
 import com.victorkithinji.wrap.wrapca.dto.request.PhaseTwoRunRequestDto;
+import com.victorkithinji.wrap.wrapca.dto.response.GridEnvironmentResponseDto;
 import com.victorkithinji.wrap.wrapca.dto.response.PhaseOneResultResponseDto;
 import com.victorkithinji.wrap.wrapca.dto.response.PhaseTwoResultResponseDto;
 import com.victorkithinji.wrap.wrapca.dto.response.RunSummaryResponseDto;
@@ -114,6 +116,11 @@ public class WrapSessionFacade {
 	private volatile SimulationModeEnum mode = SimulationModeEnum.PRE_FIRE;
 	// Active Phase 2 grid — separate from baseGrid so Phase 1 can still run in parallel
 	private volatile CaGrid activeFireGrid;
+	// Elevation and slope captured from resampled GridBands at init time.
+	// CaGrid stores slopeRadians in CellEnvironment but not elevationMetres directly
+	// in a flat array — we hold flat arrays here for O(1) response assembly.
+	private volatile float[] cachedElevationMetres;
+	private volatile float[] cachedSlopeDegrees;
 
 	public WrapSessionFacade(
 		SimulationConfig simulationConfig,
@@ -191,6 +198,8 @@ public class WrapSessionFacade {
 	// -------------------------------------------------------------------------
 
 	private void loadGridFromSources() throws Exception {
+		long t0 = System.currentTimeMillis();
+
 		// 1. CV fuel-state GeoTIFF (cached daily via IngestionCacheService inside CvApiClient)
 		Optional<Path> fuelStatePath = cvApiClient.fetchLatestFuelState();
 		if (fuelStatePath.isEmpty()) {
@@ -200,19 +209,34 @@ public class WrapSessionFacade {
 				"wrap.cv.stub-mode=false, or wait for CV connectivity.");
 			return;
 		}
+		log.debug("loadGridFromSources: fuel-state resolved in {}ms",
+			System.currentTimeMillis() - t0);
 
 		// 2. Read native-resolution bands from the 11-band CV tiff
+		long t1 = System.currentTimeMillis();
 		GridBands nativeBands = geoTiffBandReaderService.read(fuelStatePath.get());
+		log.debug("loadGridFromSources: CV GeoTIFF read in {}ms — native {}x{}",
+			System.currentTimeMillis() - t1, nativeBands.getRows(), nativeBands.getCols());
 
 		// 3. Read ESA WorldCover at native resolution
+		t1 = System.currentTimeMillis();
 		EsaBands nativeEsa = geoTiffBandReaderService.readEsa(Path.of(esaPath));
+		log.debug("loadGridFromSources: ESA GeoTIFF read in {}ms — native {}x{}",
+			System.currentTimeMillis() - t1, nativeEsa.getRows(), nativeEsa.getCols());
 
 		// 4. Load road layer — empty RoadLayer is fine, logged by service
+		t1 = System.currentTimeMillis();
 		RoadLayer roadLayer = osmRoadLoaderService.load();
+		log.debug("loadGridFromSources: road layer loaded in {}ms — {} segments",
+			System.currentTimeMillis() - t1, roadLayer.getSegments().size());
 
 		// 5. Resample both rasters to CA target resolution
+		t1 = System.currentTimeMillis();
 		GridBands resampledBands = rasterResamplerService.resample(nativeBands);
 		int[][] resampledEsa = rasterResamplerService.resampleEsa(nativeEsa);
+		log.debug("loadGridFromSources: resampling complete in {}ms — target {}x{}",
+			System.currentTimeMillis() - t1,
+			resampledBands.getRows(), resampledBands.getCols());
 
 		// 6. Capture bounding box from resampled bands before passing to grid builder
 		minX = resampledBands.getMinX();
@@ -220,12 +244,41 @@ public class WrapSessionFacade {
 		maxX = resampledBands.getMaxX();
 		maxY = resampledBands.getMaxY();
 
+		// Capture elevation and slope as flat row-major arrays for GET /api/session/grid.
+		// Done here because CaGrid does not hold a flat elevation array, and
+		// resampledBands is discarded after gridInitialiserService.build().
+		int dstRows = resampledBands.getRows();
+		int dstCols = resampledBands.getCols();
+		float[][] elevGrid = resampledBands.getElevationMetres();
+		float[][] slopeGrid = resampledBands.getSlopeDegrees();
+		float[] elevFlat = new float[dstRows * dstCols];
+		float[] slopeFlat = new float[dstRows * dstCols];
+		for (int r = 0; r < dstRows; r++) {
+			for (int c = 0; c < dstCols; c++) {
+				int idx = r * dstCols + c;
+				elevFlat[idx] = elevGrid[r][c];
+				slopeFlat[idx] = slopeGrid[r][c];   // already degrees from CV
+			}
+		}
+		cachedElevationMetres = elevFlat;
+		cachedSlopeDegrees = slopeFlat;
+
 		// 7. Build grid
+		t1 = System.currentTimeMillis();
 		gridInitResult = gridInitialiserService.build(resampledBands, resampledEsa, roadLayer);
 		baseGrid = gridInitResult.getGrid();
+		log.debug("loadGridFromSources: grid built in {}ms — {}x{} cells",
+			System.currentTimeMillis() - t1, baseGrid.rows, baseGrid.cols);
 
-		// 8. Load wind field dimensioned to the target grid
+		// 8. Load wind field aligned to the target grid
 		windField = windFieldLoaderService.load(baseGrid.rows, baseGrid.cols);
+
+		log.info("loadGridFromSources: complete in {}ms total — grid={}x{} ({} cells), " +
+				"cellSize={}m, bounds=X[{},{}] Y[{},{}]",
+			System.currentTimeMillis() - t0,
+			baseGrid.rows, baseGrid.cols, baseGrid.rows * baseGrid.cols,
+			baseGrid.cellSizeMetres,
+			(int) minX, (int) maxX, (int) minY, (int) maxY);
 	}
 
 	// -------------------------------------------------------------------------
@@ -275,20 +328,51 @@ public class WrapSessionFacade {
 		assertGridReady();
 		String runId = UUID.randomUUID().toString();
 		Instant started = Instant.now();
-		log.info("Phase 1 starting — runId={}", runId);
+		log.info("Phase 1 starting — runId={}, grid={}x{}, cells={}, runs={}, " +
+				"horizonHours={}, stepMinutes={}",
+			runId,
+			baseGrid.rows, baseGrid.cols,
+			baseGrid.rows * baseGrid.cols,
+			simulationConfig.getMonteCarloRuns(),
+			simulationConfig.getPhase1HorizonHours(),
+			simulationConfig.getTimeStepMinutes());
 
 		WindField effectiveWind = applyWindOverrides(request);
 
+		// Stage 1: I(c) weights
+		long t0 = System.currentTimeMillis();
 		float[] ic = icBuilder.build(baseGrid, gridInitResult.getRoadProximityMetres());
+		log.debug("Phase 1 [{}]: I(c) build complete — {}ms", runId,
+			System.currentTimeMillis() - t0);
 
+		// Stage 2: seed sampling
+		t0 = System.currentTimeMillis();
 		List<Long> seeds = seedSampler.sample(
 			baseGrid, ic, simulationConfig.getMonteCarloRuns(), MASTER_SEED);
+		log.debug("Phase 1 [{}]: seed sampling complete — {} seeds, {}ms", runId,
+			seeds.size(), System.currentTimeMillis() - t0);
 
+		// Stage 3: Monte Carlo ensemble — the long stage
+		log.info("Phase 1 [{}]: starting ensemble ({} runs, {} generations each)",
+			runId,
+			simulationConfig.getMonteCarloRuns(),
+			(simulationConfig.getPhase1HorizonHours() * 60)
+				/ simulationConfig.getTimeStepMinutes());
+		t0 = System.currentTimeMillis();
 		BurnFrequencyAccumulator accumulator =
 			ensembleRunner.run(baseGrid, effectiveWind, seeds, MASTER_SEED);
+		long ensembleMs = System.currentTimeMillis() - t0;
+		log.info("Phase 1 [{}]: ensemble complete — {}ms ({} s), avg {} ms/run",
+			runId, ensembleMs,
+			String.format("%.1f", ensembleMs / 1000.0),
+			String.format("%.0f", ensembleMs / (double) simulationConfig.getMonteCarloRuns()));
 
+		// Stage 4: assemble result
+		t0 = System.currentTimeMillis();
 		PhaseOneResult result =
 			riskMapAssembler.assemble(accumulator, ic, simulationConfig.getMonteCarloRuns());
+		log.debug("Phase 1 [{}]: result assembly complete — {}ms", runId,
+			System.currentTimeMillis() - t0);
 
 		Instant completed = Instant.now();
 		persistRunRecord(runId, SimulationModeEnum.PRE_FIRE, started, completed,
@@ -400,6 +484,56 @@ public class WrapSessionFacade {
 		cvStateInjectorService.inject(activeFireGrid, correction);
 		log.info("CV correction applied — suppressed={}, moistureUpdates={}",
 			suppressedIds.size(), moistureMap.size());
+	}
+
+	// -------------------------------------------------------------------------
+	// Grid environment (GET /api/session/grid)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Returns the static per-cell environmental data for the frontend map render.
+	 * Built from CaGrid.environment and the elevation/slope arrays captured at
+	 * grid init time. Throws IllegalStateException when grid is not ready —
+	 * controller converts this to HTTP 503.
+	 */
+	public GridEnvironmentResponseDto getGridEnvironment() {
+		assertGridReady();
+		int cells = baseGrid.rows * baseGrid.cols;
+		int[] vegOrdinals = new int[cells];
+
+		for (int r = 0; r < baseGrid.rows; r++) {
+			for (int c = 0; c < baseGrid.cols; c++) {
+				int idx = r * baseGrid.cols + c;
+				vegOrdinals[idx] = baseGrid.environment[r][c]
+					.getVegetationType().ordinal();
+			}
+		}
+
+		return new GridEnvironmentResponseDto(
+			vegOrdinals,
+			cachedElevationMetres,
+			cachedSlopeDegrees,
+			baseGrid.rows,
+			baseGrid.cols,
+			baseGrid.cellSizeMetres,
+			minX, minY, maxX, maxY);
+	}
+
+	// -------------------------------------------------------------------------
+	// Mode override (POST /api/session/mode)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Manually sets the session mode. Does not alter any grid state or clear
+	 * any simulation history. The 3-hour CV poll may subsequently override
+	 * this back to ACTIVE_FIRE if a fire perimeter is detected — CV observation
+	 * takes precedence over manual override by design.
+	 */
+	public synchronized SessionStatusResponseDto setMode(SimulationModeEnum newMode) {
+		SimulationModeEnum previous = this.mode;
+		this.mode = newMode;
+		log.info("Session mode manually overridden: {} → {}", previous, newMode);
+		return getSessionStatus();
 	}
 
 	// -------------------------------------------------------------------------

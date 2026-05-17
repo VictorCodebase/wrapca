@@ -24,6 +24,8 @@ import com.victorkithinji.wrap.wrapca.history.RunRecord;
 
 import com.victorkithinji.wrap.wrapca.ingestion.*;
 import com.victorkithinji.wrap.wrapca.montecarlo.*;
+import com.victorkithinji.wrap.wrapca.output.RunAnalytics;
+import com.victorkithinji.wrap.wrapca.output.RunAnalyticsService;
 import com.victorkithinji.wrap.wrapca.output.SimulationResultAssemblerService;
 import com.victorkithinji.wrap.wrapca.simulation.CaSpreadEngine;
 import com.victorkithinji.wrap.wrapca.simulation.SimulationStepResult;
@@ -86,6 +88,8 @@ class WrapSessionFacadeTest {
 	@Mock
 	SimulationResultAssemblerService resultAssemblerService;
 	@Mock
+	RunAnalyticsService analyticsService;
+	@Mock
 	RunLogWriterService runLogWriterService;
 	@Mock
 	RunLogReaderService runLogReaderService;
@@ -107,7 +111,8 @@ class WrapSessionFacadeTest {
 			windFieldLoaderService, firePerimeterParserService,
 			icBuilder, seedSampler, ensembleRunner, riskMapAssembler,
 			caSpreadEngine, cvStateInjectorService, suppressedZoneRegistry,
-			resultAssemblerService, runLogWriterService, runLogReaderService);
+			resultAssemblerService, analyticsService,
+			runLogWriterService, runLogReaderService);
 
 		// Inject @Value field that Spring would normally inject
 		ReflectionTestUtils.setField(facade, "esaPath", "./data/esa/esa_worldcover.tif");
@@ -204,7 +209,7 @@ class WrapSessionFacadeTest {
 	void getSessionStatus_includesPastRunsFromHistory() {
 		triggerSuccessfulRefresh();
 		RunRecord record = new RunRecord("run-1", SimulationModeEnum.PRE_FIRE,
-			Instant.now(), Instant.now(), Map.of(), null);
+			Instant.now(), Instant.now(), Map.of(), null, null);
 		when(runLogReaderService.readAll()).thenReturn(List.of(record));
 
 		SessionStatusResponseDto status = facade.getSessionStatus();
@@ -261,17 +266,13 @@ class WrapSessionFacadeTest {
 	// -------------------------------------------------------------------------
 
 	@Test
-	void runPhaseTwo_manualIgnition_seedsCellsFromGeoJson() {
+	void runPhaseTwo_manualIgnition_seedsCellsFromGeoJson() throws IOException {
 		triggerSuccessfulRefresh();
 		stubPhaseTwoPipeline();
 
 		Set<Long> fakeCells = Set.of(0L, 1L, 2L);
-		try {
-			doReturn(fakeCells).when(firePerimeterParserService).parse(
-				anyString(), anyDouble(), anyDouble(), anyDouble(), anyInt(), anyInt());
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		doReturn(fakeCells).when(firePerimeterParserService).parse(
+			anyString(), anyDouble(), anyDouble(), anyDouble(), anyInt(), anyInt());
 
 		PhaseTwoRunRequestDto req = new PhaseTwoRunRequestDto();
 		req.setManualIgnition(true);
@@ -280,18 +281,14 @@ class WrapSessionFacadeTest {
 
 		facade.runPhaseTwo(req);
 
-		try {
-			verify(firePerimeterParserService).parse(eq("{\"type\":\"Polygon\"}"),
-				anyDouble(), anyDouble(), anyDouble(), anyInt(), anyInt());
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		verify(firePerimeterParserService).parse(eq("{\"type\":\"Polygon\"}"),
+			anyDouble(), anyDouble(), anyDouble(), anyInt(), anyInt());
 		verify(suppressedZoneRegistry).clear();
 		verify(caSpreadEngine).run(any(), any(), any(), anyInt());
 	}
 
 	@Test
-	void runPhaseTwo_cvNotDisabled_fetchesCvPerimeter() {
+	void runPhaseTwo_cvNotDisabled_fetchesCvPerimeter() throws IOException {
 		triggerSuccessfulRefresh();
 		stubPhaseTwoPipeline();
 
@@ -299,12 +296,8 @@ class WrapSessionFacadeTest {
 			"{\"type\":\"Polygon\"}", Collections.emptyList(), Collections.emptyList(),
 			Collections.emptyMap(), Instant.now());
 		when(cvApiClient.fetchLatestFirePerimeter()).thenReturn(Optional.of(perimeter));
-		try {
-			doReturn(Set.of(0L)).when(firePerimeterParserService).parse(
-				anyString(), anyDouble(), anyDouble(), anyDouble(), anyInt(), anyInt());
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		doReturn(Set.of(0L)).when(firePerimeterParserService).parse(
+			anyString(), anyDouble(), anyDouble(), anyDouble(), anyInt(), anyInt());
 
 		PhaseTwoRunRequestDto req = new PhaseTwoRunRequestDto();
 		req.setSimulationHours(1);
@@ -416,7 +409,7 @@ class WrapSessionFacadeTest {
 	@Test
 	void getAllRuns_delegatesToReader() {
 		RunRecord r = new RunRecord("id", SimulationModeEnum.PRE_FIRE,
-			Instant.now(), Instant.now(), Map.of(), null);
+			Instant.now(), Instant.now(), Map.of(), null, null);
 		when(runLogReaderService.readAll()).thenReturn(List.of(r));
 
 		assertThat(facade.getAllRuns()).hasSize(1);
@@ -472,13 +465,21 @@ class WrapSessionFacadeTest {
 			new float[]{0.4f, 0.3f, 0.2f, 0.1f},
 			2, 2);
 		when(riskMapAssembler.assemble(any(), any(), anyInt())).thenReturn(result);
+		// Analytics stub — returns a minimal all-null analytics object
+		RunAnalytics analytics = new RunAnalytics(1, 0.01, List.of(0L), "GRASSLAND",
+			null, null, null, null);
+		when(analyticsService.summarisePhaseOne(any(), any(), any(), anyInt()))
+			.thenReturn(analytics);
 		PhaseOneResultResponseDto dto = new PhaseOneResultResponseDto(
 			"run-1",
 			new float[]{0.1f, 0.2f, 0.3f, 0.4f},
 			new float[]{0.4f, 0.3f, 0.2f, 0.1f},
 			new int[]{1, 1, 1, 1},
-			2, 2);
-		when(resultAssemblerService.assemblePhaseOne(any(), any(), any(), any())).thenReturn(dto);
+			2, 2,
+			analytics);
+		// Updated signature: assemblePhaseOne now accepts analytics as fifth argument
+		when(resultAssemblerService.assemblePhaseOne(any(), any(), any(), any(), any()))
+			.thenReturn(dto);
 	}
 
 	private void stubPhaseTwoPipeline() {
@@ -488,9 +489,15 @@ class WrapSessionFacadeTest {
 		when(simulationConfig.getMonteCarloRuns()).thenReturn(10);
 		when(caSpreadEngine.run(any(), any(), any(), anyInt()))
 			.thenReturn(Collections.emptyList());
+		RunAnalytics analytics = new RunAnalytics(null, null, null, null,
+			0.0, null, 0, 0);
+		when(analyticsService.summarisePhaseTwo(anyList(), any(), any()))
+			.thenReturn(analytics);
 		PhaseTwoResultResponseDto dto = new PhaseTwoResultResponseDto(
-			"run-2", Collections.emptyList());
-		when(resultAssemblerService.assemblePhaseTwo(any(), any(), anyList())).thenReturn(dto);
+			"run-2", Collections.emptyList(), analytics);
+		// Updated signature: assemblePhaseTwo now accepts analytics as fourth argument
+		when(resultAssemblerService.assemblePhaseTwo(any(), any(), anyList(), any()))
+			.thenReturn(dto);
 	}
 
 	// --- Minimal fixture builders ---

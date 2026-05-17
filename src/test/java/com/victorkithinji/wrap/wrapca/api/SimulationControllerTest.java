@@ -53,7 +53,7 @@ class SimulationControllerTest {
 			new float[]{0.1f, 0.2f},
 			new float[]{0.3f, 0.4f},
 			new int[]{1, 1},
-			1, 2);
+			1, 2, null);
 		when(facade.runPhaseOne(any())).thenReturn(dto);
 
 		mockMvc.perform(post("/api/simulation/phase-one/run")
@@ -70,7 +70,7 @@ class SimulationControllerTest {
 	@Test
 	void phaseOneRun_noBody_returns200() throws Exception {
 		PhaseOneResultResponseDto dto = new PhaseOneResultResponseDto(
-			"run-x", new float[0], new float[0], new int[0], 0, 0);
+			"run-x", new float[0], new float[0], new int[0], 0, 0, null);
 		when(facade.runPhaseOne(any())).thenReturn(dto);
 
 		mockMvc.perform(post("/api/simulation/phase-one/run"))
@@ -80,7 +80,7 @@ class SimulationControllerTest {
 	@Test
 	void phaseOneRun_withWindOverrides_passesThrough() throws Exception {
 		PhaseOneResultResponseDto dto = new PhaseOneResultResponseDto(
-			"run-2", new float[0], new float[0], new int[0], 0, 0);
+			"run-2", new float[0], new float[0], new int[0], 0, 0, null);
 		when(facade.runPhaseOne(any())).thenReturn(dto);
 
 		PhaseOneRunRequestDto req = new PhaseOneRunRequestDto();
@@ -102,7 +102,7 @@ class SimulationControllerTest {
 	@Test
 	void phaseTwoRun_validRequest_returns200() throws Exception {
 		PhaseTwoResultResponseDto dto = new PhaseTwoResultResponseDto(
-			"run-3", Collections.emptyList());
+			"run-3", Collections.emptyList(), null);
 		when(facade.runPhaseTwo(any())).thenReturn(dto);
 
 		PhaseTwoRunRequestDto req = new PhaseTwoRunRequestDto();
@@ -119,7 +119,7 @@ class SimulationControllerTest {
 	@Test
 	void phaseTwoRun_manualIgnition_passesGeoJson() throws Exception {
 		PhaseTwoResultResponseDto dto = new PhaseTwoResultResponseDto(
-			"run-4", Collections.emptyList());
+			"run-4", Collections.emptyList(), null);
 		when(facade.runPhaseTwo(any())).thenReturn(dto);
 
 		PhaseTwoRunRequestDto req = new PhaseTwoRunRequestDto();

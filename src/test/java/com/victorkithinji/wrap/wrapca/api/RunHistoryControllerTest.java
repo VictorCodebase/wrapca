@@ -57,7 +57,7 @@ class RunHistoryControllerTest {
 			Instant.parse("2025-06-01T06:00:00Z"),
 			Instant.parse("2025-06-01T06:05:00Z"),
 			Map.of("monteCarloRuns", 200),
-			null);
+			null, null);
 		when(facade.getAllRuns()).thenReturn(List.of(r));
 
 		mockMvc.perform(get("/api/runs"))
@@ -73,7 +73,7 @@ class RunHistoryControllerTest {
 			SimulationModeEnum.ACTIVE_FIRE,
 			Instant.now(), Instant.now(),
 			Map.of("simulationHours", 6),
-			null);
+			null, null);
 		when(facade.getRunById("run-xyz")).thenReturn(r);
 
 		mockMvc.perform(get("/api/runs/run-xyz"))

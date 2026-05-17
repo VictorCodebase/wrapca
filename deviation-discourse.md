@@ -162,3 +162,36 @@ chronological order.
 - 4 (ingestion — `IngestionCacheService` gains `getLatestCachedFuelState()`)
 - 12 (facade — `loadGridFromSources` already changed in DEV-007/008 to warn-and-return;
   no further change needed since `CvApiClient` now handles its own fallback)
+
+## DEV-010 — RunAnalytics attached to run response and persisted with RunRecord
+
+**What changed:** Every completed simulation run now produces a `RunAnalytics`
+summary object. It is attached to the HTTP response DTO returned by the run
+endpoint, and it must also be stored inside the corresponding `RunRecord` so
+that analytics are available via `GET /api/runs/{runId}` without re-running the
+simulation.
+
+Phase 1 analytics: high-risk cell count, high-risk area in hectares,
+top-5 ignition seed cells by burn frequency, dominant vegetation type among
+high-risk cells.
+
+Phase 2 analytics: final burned area in hectares, average rate of spread in
+hectares per hour, generation count, perimeter boundary cell count.
+
+Fields not applicable to the current phase are serialised as JSON `null` —
+they are never suppressed. This makes the distinction between "not applicable"
+and "zero" explicit in the API response.
+
+**Why:** Post-review feedback identified that returning only risk arrays and
+perimeter polygons was not actionable without interpretation. Analytics derive
+entirely from data already computed during the simulation run — no new data
+sources, no new endpoints, and no second simulation pass are required.
+
+**Groups affected:**
+
+- 9 (output — new `RunAnalytics`, `RunAnalyticsService`; `SimulationResultAssemblerService`
+  updated to accept and attach analytics)
+- 10 (history — `RunRecord` gains `RunAnalytics analytics` field)
+- 11 (dto — both response DTOs gain `RunAnalytics analytics` field)
+- 12 (facade — compute analytics once after simulation, pass to both assembler
+  and run-record writer)

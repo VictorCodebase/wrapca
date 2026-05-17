@@ -1,5 +1,6 @@
 package com.victorkithinji.wrap.wrapca.dto.response;
 
+import com.victorkithinji.wrap.wrapca.output.RunAnalytics;
 import lombok.Value;
 
 import java.util.List;
@@ -25,4 +26,6 @@ public class PhaseTwoResultResponseDto {
 	 * Empty list if fire died out before any cell ignited (degenerate case).
 	 */
 	List<PerimeterSnapshotDto> perimetersByTimestamp;
+
+	RunAnalytics analytics;
 }

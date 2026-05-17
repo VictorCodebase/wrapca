@@ -1,5 +1,6 @@
 package com.victorkithinji.wrap.wrapca.dto.response;
 
+import com.victorkithinji.wrap.wrapca.output.RunAnalytics;
 import lombok.Value;
 
 /**
@@ -49,4 +50,6 @@ public class PhaseOneResultResponseDto {
 	 * Grid column count.
 	 */
 	int cols;
+
+	RunAnalytics analytics;
 }

@@ -38,6 +38,8 @@ import com.victorkithinji.wrap.wrapca.montecarlo.IgnitionSeedSampler;
 import com.victorkithinji.wrap.wrapca.montecarlo.MonteCarloEnsembleRunner;
 import com.victorkithinji.wrap.wrapca.montecarlo.PhaseOneResult;
 import com.victorkithinji.wrap.wrapca.montecarlo.RiskMapAssembler;
+import com.victorkithinji.wrap.wrapca.output.RunAnalytics;
+import com.victorkithinji.wrap.wrapca.output.RunAnalyticsService;
 import com.victorkithinji.wrap.wrapca.output.SimulationResultAssemblerService;
 import com.victorkithinji.wrap.wrapca.simulation.CaSpreadEngine;
 import com.victorkithinji.wrap.wrapca.simulation.SimulationStepResult;
@@ -101,6 +103,7 @@ public class WrapSessionFacade {
 	private final CvStateInjectorService cvStateInjectorService;
 	private final SuppressedZoneRegistry suppressedZoneRegistry;
 	private final SimulationResultAssemblerService resultAssemblerService;
+	private final RunAnalyticsService analyticsService;
 	private final RunLogWriterService runLogWriterService;
 	private final RunLogReaderService runLogReaderService;
 
@@ -139,6 +142,7 @@ public class WrapSessionFacade {
 		CvStateInjectorService cvStateInjectorService,
 		SuppressedZoneRegistry suppressedZoneRegistry,
 		SimulationResultAssemblerService resultAssemblerService,
+		RunAnalyticsService analyticsService,
 		RunLogWriterService runLogWriterService,
 		RunLogReaderService runLogReaderService) {
 		this.simulationConfig = simulationConfig;
@@ -157,6 +161,7 @@ public class WrapSessionFacade {
 		this.cvStateInjectorService = cvStateInjectorService;
 		this.suppressedZoneRegistry = suppressedZoneRegistry;
 		this.resultAssemblerService = resultAssemblerService;
+		this.analyticsService = analyticsService;
 		this.runLogWriterService = runLogWriterService;
 		this.runLogReaderService = runLogReaderService;
 	}
@@ -374,9 +379,22 @@ public class WrapSessionFacade {
 		log.debug("Phase 1 [{}]: result assembly complete — {}ms", runId,
 			System.currentTimeMillis() - t0);
 
+		// Stage 5: analytics — derived entirely from already-computed data, no extra simulation
+		RunAnalytics analytics = analyticsService.summarisePhaseOne(
+			result.getDamagePotential(),
+			result.getIgnitionLikelihood(),
+			baseGrid,
+			simulationConfig.getMonteCarloRuns());
+		log.debug("Phase 1 [{}]: analytics — highRiskCells={}, highRiskAreaHa={}, " +
+				"dominantVeg={}",
+			runId,
+			analytics.getHighRiskCellCount(),
+			analytics.getHighRiskAreaHectares(),
+			analytics.getDominantVegetationType());
+
 		Instant completed = Instant.now();
 		persistRunRecord(runId, SimulationModeEnum.PRE_FIRE, started, completed,
-			buildParamsSnapshot(request));
+			buildParamsSnapshot(request), analytics);
 
 		log.info("Phase 1 complete — runId={}, elapsed={}ms",
 			runId, elapsed(started, completed));
@@ -384,7 +402,8 @@ public class WrapSessionFacade {
 		return resultAssemblerService.assemblePhaseOne(
 			runId, baseGrid,
 			result.getDamagePotential(),
-			result.getIgnitionLikelihood());
+			result.getIgnitionLikelihood(),
+			analytics);
 	}
 
 	// -------------------------------------------------------------------------
@@ -410,13 +429,24 @@ public class WrapSessionFacade {
 			activeFireGrid, windField, suppressedZoneRegistry, generations);
 
 		Instant completed = Instant.now();
+
+		RunAnalytics analytics = analyticsService.summarisePhaseTwo(
+			steps, activeFireGrid, simulationConfig);
+		log.debug("Phase 2 [{}]: analytics — burnedAreaHa={}, avgRosHa/h={}, " +
+				"generations={}, perimeterCells={}",
+			runId,
+			analytics.getFinalBurnedAreaHectares(),
+			analytics.getAverageRosHectaresPerHour(),
+			analytics.getGenerationsRun(),
+			analytics.getPerimeterCellCountFinal());
+
 		persistRunRecord(runId, SimulationModeEnum.ACTIVE_FIRE, started, completed,
-			buildParamsSnapshot(request));
+			buildParamsSnapshot(request), analytics);
 
 		log.info("Phase 2 complete — runId={}, generations={}, elapsed={}ms",
 			runId, steps.size(), elapsed(started, completed));
 
-		return resultAssemblerService.assemblePhaseTwo(runId, activeFireGrid, steps);
+		return resultAssemblerService.assemblePhaseTwo(runId, activeFireGrid, steps, analytics);
 	}
 
 	private void seedActiveFire(PhaseTwoRunRequestDto request) {
@@ -609,9 +639,10 @@ public class WrapSessionFacade {
 	}
 
 	private void persistRunRecord(String runId, SimulationModeEnum phase,
-								  Instant started, Instant completed, Map<String, Object> params) {
+								  Instant started, Instant completed, Map<String, Object> params,
+								  RunAnalytics analytics) {
 		runLogWriterService.write(
-			new RunRecord(runId, phase, started, completed, params, null));
+			new RunRecord(runId, phase, started, completed, params, null, analytics));
 	}
 
 	private Map<String, Object> buildParamsSnapshot(Object request) {

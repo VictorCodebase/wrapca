@@ -1,6 +1,7 @@
 package com.victorkithinji.wrap.wrapca.history;
 
 import com.victorkithinji.wrap.wrapca.dto.SimulationModeEnum;
+import com.victorkithinji.wrap.wrapca.output.RunAnalytics;
 import lombok.Value;
 
 import java.time.Instant;
@@ -50,4 +51,6 @@ public class RunRecord {
 	 * {@link RunLogWriterService} was called without a result path).
 	 */
 	String resultFilePath;
+
+	RunAnalytics analytics;
 }

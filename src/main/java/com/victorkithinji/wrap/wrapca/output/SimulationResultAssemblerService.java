@@ -16,6 +16,11 @@ import java.util.List;
  * Converts simulation outputs into API response DTOs.
  * Does not perform any simulation logic — reads grid state and step history only.
  * Does not emit GeoTIFF bytes or raw grid arrays.
+ *
+ * <p>Callers are responsible for computing {@link RunAnalytics} via
+ * {@link RunAnalyticsService} before calling these methods and passing the result in.
+ * Analytics computation is intentionally kept out of this class to preserve the
+ * single-responsibility of each service.
  */
 @Slf4j
 @Service
@@ -25,19 +30,22 @@ public class SimulationResultAssemblerService {
 	private final PerimeterPolygonExtractorService perimeterExtractor;
 
 	/**
-	 * Assembles a Phase 1 result from Monte Carlo output arrays and the final grid.
+	 * Assembles a Phase 1 result from Monte Carlo output arrays, the final grid,
+	 * and a pre-computed analytics summary.
 	 *
 	 * @param runId                 Unique identifier for this run.
 	 * @param grid                  The grid used for this run — read-only here.
 	 * @param damagePotentialValues Normalised burn-frequency values, one per cell, row-major.
 	 * @param ignitionProbValues    Normalised I(c) values, one per cell, row-major.
+	 * @param analytics             Pre-computed Phase 1 analytics from {@link RunAnalyticsService}.
 	 * @return Populated {@link PhaseOneResultResponseDto}.
 	 */
 	public PhaseOneResultResponseDto assemblePhaseOne(
 		String runId,
 		CaGrid grid,
 		float[] damagePotentialValues,
-		float[] ignitionProbValues) {
+		float[] ignitionProbValues,
+		RunAnalytics analytics) {
 
 		int cellCount = grid.rows * grid.cols;
 
@@ -58,22 +66,28 @@ public class SimulationResultAssemblerService {
 			ignitionProbValues,
 			vegetationTypeOrdinals,
 			grid.rows,
-			grid.cols);
+			grid.cols,
+			analytics);
 	}
 
 	/**
-	 * Assembles a Phase 2 result from the ordered list of step results.
-	 * Each step that produced newly ignited cells yields a perimeter snapshot.
+	 * Assembles a Phase 2 result from the ordered list of step results and a
+	 * pre-computed analytics summary.
 	 *
-	 * @param runId Unique identifier for this run.
-	 * @param grid  The grid in its final state after all generations.
-	 * @param steps Ordered list of step results from {@code CaSpreadEngine.run()}.
+	 * <p>Each step that produced newly ignited cells yields a perimeter snapshot.
+	 * Steps with no new ignitions are silently skipped.
+	 *
+	 * @param runId     Unique identifier for this run.
+	 * @param grid      The grid in its final state after all generations.
+	 * @param steps     Ordered list of step results from {@code CaSpreadEngine.run()}.
+	 * @param analytics Pre-computed Phase 2 analytics from {@link RunAnalyticsService}.
 	 * @return Populated {@link PhaseTwoResultResponseDto}.
 	 */
 	public PhaseTwoResultResponseDto assemblePhaseTwo(
 		String runId,
 		CaGrid grid,
-		List<SimulationStepResult> steps) {
+		List<SimulationStepResult> steps,
+		RunAnalytics analytics) {
 
 		List<PerimeterSnapshotDto> snapshots = new ArrayList<>();
 
@@ -88,7 +102,7 @@ public class SimulationResultAssemblerService {
 		log.debug("Phase 2 result assembled: runId={}, generations={}, snapshots={}",
 			runId, steps.size(), snapshots.size());
 
-		return new PhaseTwoResultResponseDto(runId, snapshots);
+		return new PhaseTwoResultResponseDto(runId, snapshots, analytics);
 	}
 
 	// --- private helpers ---

@@ -436,7 +436,12 @@ public class WrapSessionFacade {
 				"generations={}, perimeterCells={}",
 			runId,
 			analytics.getFinalBurnedAreaHectares(),
-			analytics.getAverageRosHectaresPerHour(),
+			analytics.getBurnedAreaByVegetationType(),
+			analytics.getPeakRosHectaresPerHour(),
+			analytics.getStepAtPeakRos(),
+			analytics.getPerimeterLengthMetres(),
+			analytics.getSimulatedDurationHours(),
+			analytics.getNaturalBarrierCellsEncountered(),
 			analytics.getGenerationsRun(),
 			analytics.getPerimeterCellCountFinal());
 

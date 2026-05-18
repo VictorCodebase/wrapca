@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Derives {@link RunAnalytics} from completed simulation outputs.
@@ -18,9 +17,9 @@ import java.util.stream.Collectors;
  * <p>Stateless. Both methods are pure functions of their inputs — no side effects,
  * no shared mutable state. Safe to call from multiple threads simultaneously.
  *
- * <p>Neither method throws. If inputs are inconsistent (e.g. array/grid size mismatch),
- * a warning is logged and an all-null {@link RunAnalytics} is returned so the caller's
- * response assembly is never blocked by analytics failure.
+ * <p>Neither method throws. Inconsistent inputs (array/grid size mismatch) are
+ * logged as warnings and return an all-null {@link RunAnalytics} so response
+ * assembly is never blocked by analytics failure.
  */
 @Slf4j
 @Service
@@ -31,13 +30,16 @@ public class RunAnalyticsService {
 
 	private final SimulationConfig simulationConfig;
 
+	// =========================================================================
+	// Public API
+	// =========================================================================
+
 	/**
 	 * Produces a Phase 1 analytics summary from Monte Carlo output arrays.
+	 * All Phase 2 fields on the returned object are null.
 	 *
-	 * <p>All Phase 2 fields on the returned object are null.
-	 *
-	 * @param damagePotentialValues Flat row-major array, length {@code rows × cols}.
-	 * @param ignitionProbValues    Flat row-major array, length {@code rows × cols}.
+	 * @param damagePotentialValues Flat row-major array, length rows x cols.
+	 * @param ignitionProbValues    Flat row-major array, length rows x cols.
 	 * @param grid                  Fully initialised grid matching the arrays.
 	 * @param totalRuns             Number of Monte Carlo runs that produced the arrays.
 	 * @return Phase 1 analytics. Never null itself, but all fields may be null on error.
@@ -49,52 +51,67 @@ public class RunAnalyticsService {
 		int totalRuns) {
 
 		int expected = grid.rows * grid.cols;
-
 		if (damagePotentialValues.length != expected) {
 			log.warn("summarisePhaseOne: damagePotentialValues length {} != grid cells {}; "
 				+ "returning null analytics", damagePotentialValues.length, expected);
 			return nullAnalytics();
 		}
 
-		// --- Step 1: 75th-percentile threshold and high-risk cell count ---
+		double cellSizeM = simulationConfig.getCellSizeMetres();
+		double cellAreaHa = (cellSizeM * cellSizeM) / 10_000.0;
+
+		// 1. P75 threshold and high-risk cell count
 		float p75 = percentile75(damagePotentialValues);
 		int highRiskCount = 0;
 		for (float v : damagePotentialValues) {
 			if (v >= p75) highRiskCount++;
 		}
 
-		// --- Step 2: high-risk area ---
-		double cellSizeM = simulationConfig.getCellSizeMetres();
-		double cellAreaHa = (cellSizeM * cellSizeM) / 10_000.0;
+		// 2. High-risk area total
 		double highRiskAreaHa = highRiskCount * cellAreaHa;
 
-		// --- Step 3: top-5 ignition seeds by damage potential (descending) ---
-		List<Long> topSeeds = topSeeds(damagePotentialValues, grid.cols);
+		// 3. High-risk area broken down by vegetation type
+		Map<String, Double> highRiskAreaByVeg =
+			highRiskAreaByVegetationType(damagePotentialValues, p75, grid, cellAreaHa);
 
-		// --- Step 4: dominant vegetation type among high-risk cells ---
-		String dominantVeg = dominantVegetationType(damagePotentialValues, p75, grid);
+		// 4. Top-5 seeds with parallel scores
+		int[] seedIndices = topSeedIndices(damagePotentialValues);
+		List<Long> topSeeds = new ArrayList<>(seedIndices.length);
+		List<Double> seedScores = new ArrayList<>(seedIndices.length);
+		for (int flat : seedIndices) {
+			int row = flat / grid.cols;
+			int col = flat % grid.cols;
+			topSeeds.add((long) row * grid.cols + col);
+			seedScores.add((double) damagePotentialValues[flat]);
+		}
+
+		// 5. Dominant vegetation type
+		String dominantVeg = dominantVegetationType(highRiskAreaByVeg);
+
+		// 6. Simulated horizon
+		double horizonHours = simulationConfig.getPhase1HorizonHours();
 
 		return new RunAnalytics(
 			highRiskCount,
 			highRiskAreaHa,
-			topSeeds,
+			Collections.unmodifiableMap(highRiskAreaByVeg),
+			Collections.unmodifiableList(topSeeds),
+			Collections.unmodifiableList(seedScores),
 			dominantVeg,
-			null,   // finalBurnedAreaHectares
-			null,   // averageRosHectaresPerHour
-			null,   // generationsRun
-			null    // perimeterCellCountFinal
+			horizonHours,
+			// Phase 2 fields
+			null, null, null, null, null, null, null, null, null
 		);
 	}
 
 	/**
-	 * Produces a Phase 2 analytics summary from the engine's step results and final grid.
+	 * Produces a Phase 2 analytics summary from step results and the final grid.
+	 * All Phase 1 fields on the returned object are null.
+	 * If steps is empty, all Phase 2 fields are null except generationsRun = 0.
 	 *
-	 * <p>All Phase 1 fields on the returned object are null.
-	 * If {@code steps} is empty, all Phase 2 fields are null except {@code generationsRun = 0}.
-	 *
-	 * @param steps  Ordered step results from {@code CaSpreadEngine.run()}.
+	 * @param steps  Ordered step results from CaSpreadEngine.run().
 	 * @param grid   Grid in its final state after all generations.
-	 * @param config Simulation configuration — provides cell size and time-step.
+	 * @param config Simulation configuration — cell size and time-step.
 	 * @return Phase 2 analytics. Never null itself.
 	 */
 	public RunAnalytics summarisePhaseTwo(
@@ -106,136 +123,176 @@ public class RunAnalyticsService {
 
 		if (generationsRun == 0) {
 			return new RunAnalytics(
-				null, null, null, null,  // phase 1 fields
-				null, null,              // finalBurnedAreaHa, averageRos
-				0,                       // generationsRun
-				null                     // perimeterCellCount
+				null, null, null, null, null, null, null, // Phase 1 fields
+				null, null, null, null, null, null, null, // Phase 2 fields (most)
+				0d, 0                                         // generationsRun
 			);
 		}
 
 		double cellSizeM = config.getCellSizeMetres();
 		double cellAreaHa = (cellSizeM * cellSizeM) / 10_000.0;
 
-		// --- Step 1: count BURNED cells and compute area ---
+		// 1. Burned area total + breakdown by vegetation type
 		int burnedCells = 0;
+		Map<VegetationTypeEnum, Integer> burnedByVeg = new EnumMap<>(VegetationTypeEnum.class);
 		for (int r = 0; r < grid.rows; r++) {
 			for (int c = 0; c < grid.cols; c++) {
 				if (grid.states[r][c] == CellStateEnum.BURNED.ordinal()) {
 					burnedCells++;
+					VegetationTypeEnum veg = grid.environment[r][c].getVegetationType();
+					burnedByVeg.merge(veg, 1, Integer::sum);
 				}
 			}
 		}
 		double finalBurnedAreaHa = burnedCells * cellAreaHa;
 
-		// --- Step 2: average ROS (only meaningful with >= 2 generations) ---
-		Double averageRos = null;
+		Map<String, Double> burnedAreaByVeg = new LinkedHashMap<>();
+		burnedByVeg.forEach((veg, count) ->
+			burnedAreaByVeg.put(veg.name(), count * cellAreaHa));
+
+		// 2. Peak ROS and step index — requires >= 2 generations to be meaningful
+		Double peakRos = null;
+		Integer stepAtPeak = null;
 		if (generationsRun >= 2) {
-			double simulatedHours = (generationsRun * (double) config.getTimeStepMinutes()) / 60.0;
-			averageRos = (simulatedHours > 0) ? finalBurnedAreaHa / simulatedHours : null;
+			double timeStepHours = config.getTimeStepMinutes() / 60.0;
+			double best = -1.0;
+			for (SimulationStepResult step : steps) {
+				double ros = step.getNewlyIgnitedCells().size() * cellAreaHa / timeStepHours;
+				if (ros > best) {
+					best = ros;
+					stepAtPeak = step.getGeneration();
+				}
+			}
+			peakRos = best;
 		}
 
-		// --- Step 3: perimeter cell count ---
+		// 3. Perimeter cell count and linear perimeter
 		int perimeterCount = countBoundaryCells(grid);
+		double perimeterMetres = perimeterCount * cellSizeM;
+
+		// 4. Natural barrier cells adjacent to burned area
+		int barrierCells = countNaturalBarrierCells(grid);
+
+		// 5. Simulated duration
+		double durationHours =
+			(generationsRun * (double) config.getTimeStepMinutes()) / 60.0;
 
 		return new RunAnalytics(
-			null, null, null, null,  // phase 1 fields
+			null, null, null, null, null, null, null,       // Phase 1 fields
 			finalBurnedAreaHa,
-			averageRos,
-			generationsRun,
-			perimeterCount
+			Collections.unmodifiableMap(burnedAreaByVeg),
+			peakRos,
+			stepAtPeak,
+			perimeterMetres,
+			perimeterCount,
+			barrierCells,
+			durationHours,
+			generationsRun
 		);
 	}
 
-	// -------------------------------------------------------------------------
+	// =========================================================================
 	// Private helpers
-	// -------------------------------------------------------------------------
+	// =========================================================================
 
 	/**
-	 * Returns the 75th-percentile value of {@code values} using the nearest-rank method.
-	 * Sorts a copy so the original array is not modified.
+	 * Nearest-rank P75. Sorts a copy — does not modify the source array.
 	 */
 	private float percentile75(float[] values) {
 		float[] sorted = Arrays.copyOf(values, values.length);
 		Arrays.sort(sorted);
-		// nearest-rank: index = ceil(p/100 * n) - 1, clamped to [0, n-1]
 		int idx = (int) Math.ceil(0.75 * sorted.length) - 1;
 		idx = Math.max(0, Math.min(idx, sorted.length - 1));
 		return sorted[idx];
 	}
 
 	/**
-	 * Returns up to {@value #TOP_SEEDS_LIMIT} encoded cell indices with the highest
-	 * damage potential values, in descending order.
+	 * Returns the flat indices of the top-N cells by damage potential, descending.
+	 * Uses a boxed Integer array so Arrays.sort can accept a comparator.
 	 */
-	private List<Long> topSeeds(float[] damagePotentialValues, int cols) {
-		// Build index list sorted by value descending
-		Integer[] indices = new Integer[damagePotentialValues.length];
+	private int[] topSeedIndices(float[] dp) {
+		Integer[] indices = new Integer[dp.length];
 		for (int i = 0; i < indices.length; i++) indices[i] = i;
-
-		Arrays.sort(indices, (a, b) -> Float.compare(damagePotentialValues[b], damagePotentialValues[a]));
-
-		List<Long> seeds = new ArrayList<>(TOP_SEEDS_LIMIT);
-		for (int i = 0; i < Math.min(TOP_SEEDS_LIMIT, indices.length); i++) {
-			int flatIdx = indices[i];
-			int row = flatIdx / cols;
-			int col = flatIdx % cols;
-			seeds.add((long) row * cols + col);
-		}
-		return Collections.unmodifiableList(seeds);
+		Arrays.sort(indices, (a, b) -> Float.compare(dp[b], dp[a]));
+		int limit = Math.min(TOP_SEEDS_LIMIT, indices.length);
+		int[] result = new int[limit];
+		for (int i = 0; i < limit; i++) result[i] = indices[i];
+		return result;
 	}
 
 	/**
-	 * Finds the most frequent {@link VegetationTypeEnum} among cells whose damage
-	 * potential is at or above {@code p75}. Ties are broken by lower ordinal.
-	 *
-	 * @return {@code VegetationType.name()} of the dominant type, or {@code null}
-	 * if there are no high-risk cells (edge case: all values below p75 due
-	 * to floating-point edge, which cannot happen in practice with nearest-rank
-	 * but is handled defensively).
+	 * Builds a map of VegetationType name -> hectares among cells at or above p75.
 	 */
-	private String dominantVegetationType(float[] damagePotentialValues, float p75, CaGrid grid) {
-		Map<VegetationTypeEnum, Integer> freq = new EnumMap<>(VegetationTypeEnum.class);
+	private Map<String, Double> highRiskAreaByVegetationType(
+		float[] dp, float p75, CaGrid grid, double cellAreaHa) {
 
+		Map<VegetationTypeEnum, Integer> freq = new EnumMap<>(VegetationTypeEnum.class);
 		for (int r = 0; r < grid.rows; r++) {
 			for (int c = 0; c < grid.cols; c++) {
-				int idx = r * grid.cols + c;
-				if (damagePotentialValues[idx] >= p75) {
-					VegetationTypeEnum veg = grid.environment[r][c].getVegetationType();
-					freq.merge(veg, 1, Integer::sum);
+				if (dp[r * grid.cols + c] >= p75) {
+					freq.merge(grid.environment[r][c].getVegetationType(), 1, Integer::sum);
 				}
 			}
 		}
+		Map<String, Double> result = new LinkedHashMap<>();
+		freq.forEach((veg, count) -> result.put(veg.name(), count * cellAreaHa));
+		return result;
+	}
 
-		if (freq.isEmpty()) {
-			log.warn("dominantVegetationType: no high-risk cells found — returning null");
+	/**
+	 * Returns the VegetationType name with the highest hectare value in the map.
+	 * Tie-breaks by lower enum ordinal (deterministic).
+	 */
+	private String dominantVegetationType(Map<String, Double> areaByVeg) {
+		if (areaByVeg.isEmpty()) {
+			log.warn("dominantVegetationType: area map is empty — returning null");
 			return null;
 		}
-
-		// Max frequency; tie-break by lower ordinal (deterministic)
-		return freq.entrySet().stream()
+		return areaByVeg.entrySet().stream()
 			.max(Comparator
-				.comparingInt(Map.Entry<VegetationTypeEnum, Integer>::getValue)
-				.thenComparing(e -> -e.getKey().ordinal()))  // lower ordinal wins on tie
-			.map(e -> e.getKey().name())
+				.comparingDouble(Map.Entry<String, Double>::getValue)
+				.thenComparing(e -> -VegetationTypeEnum.valueOf(e.getKey()).ordinal()))
+			.map(Map.Entry::getKey)
 			.orElse(null);
 	}
 
 	/**
-	 * Counts cells that are BURNING or BURNED and have at least one non-fire Moore
-	 * neighbour or sit on the grid boundary.
-	 * Mirrors the boundary logic in {@link PerimeterPolygonExtractorService} but
-	 * returns a count rather than GeoJSON — no dependency on that service.
+	 * Counts fire cells that have at least one non-fire Moore neighbour or sit on the grid edge.
 	 */
 	private int countBoundaryCells(CaGrid grid) {
 		int count = 0;
 		for (int r = 0; r < grid.rows; r++) {
 			for (int c = 0; c < grid.cols; c++) {
-				int state = grid.states[r][c];
-				if (state != CellStateEnum.BURNING.ordinal() && state != CellStateEnum.BURNED.ordinal()) {
-					continue;
+				int s = grid.states[r][c];
+				if (s == CellStateEnum.BURNING.ordinal() || s == CellStateEnum.BURNED.ordinal()) {
+					if (hasNonFireNeighbour(grid, r, c)) count++;
 				}
-				if (hasNonFireNeighbour(grid, r, c)) {
-					count++;
+			}
+		}
+		return count;
+	}
+
+	/**
+	 * Counts NON_COMBUSTIBLE cells that are Moore-adjacent to at least one BURNED cell.
+	 * These represent natural barriers the fire has reached — rivers, rock outcrops, built-up edges.
+	 */
+	private int countNaturalBarrierCells(CaGrid grid) {
+		int count = 0;
+		for (int r = 0; r < grid.rows; r++) {
+			for (int c = 0; c < grid.cols; c++) {
+				if (grid.states[r][c] != CellStateEnum.NON_COMBUSTIBLE.ordinal()) continue;
+				outer:
+				for (int dr = -1; dr <= 1; dr++) {
+					for (int dc = -1; dc <= 1; dc++) {
+						if (dr == 0 && dc == 0) continue;
+						int nr = r + dr;
+						int nc = c + dc;
+						if (grid.inBounds(nr, nc)
+							&& grid.states[nr][nc] == CellStateEnum.BURNED.ordinal()) {
+							count++;
+							break outer;
+						}
+					}
 				}
 			}
 		}
@@ -250,18 +307,20 @@ public class RunAnalyticsService {
 				int nc = col + dc;
 				if (!grid.inBounds(nr, nc)) return true;
 				int ns = grid.states[nr][nc];
-				if (ns == CellStateEnum.UNBURNED.ordinal() || ns == CellStateEnum.NON_COMBUSTIBLE.ordinal()) {
-					return true;
-				}
+				if (ns == CellStateEnum.UNBURNED.ordinal()
+					|| ns == CellStateEnum.NON_COMBUSTIBLE.ordinal()) return true;
 			}
 		}
 		return false;
 	}
 
 	/**
-	 * Returns a {@link RunAnalytics} with every field null — used on error paths.
+	 * All-null instance returned on error paths.
 	 */
 	private RunAnalytics nullAnalytics() {
-		return new RunAnalytics(null, null, null, null, null, null, null, null);
+		return new RunAnalytics(
+			null, null, null, null, null, null, null,
+			null, null, null, null, null, null, null, null, null
+		);
 	}
 }

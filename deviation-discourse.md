@@ -163,35 +163,54 @@ chronological order.
 - 12 (facade — `loadGridFromSources` already changed in DEV-007/008 to warn-and-return;
   no further change needed since `CvApiClient` now handles its own fallback)
 
-## DEV-010 — RunAnalytics attached to run response and persisted with RunRecord
+## DEV-010 — RunAnalytics: expanded to operationally relevant metrics (revised)
 
-**What changed:** Every completed simulation run now produces a `RunAnalytics`
-summary object. It is attached to the HTTP response DTO returned by the run
-endpoint, and it must also be stored inside the corresponding `RunRecord` so
-that analytics are available via `GET /api/runs/{runId}` without re-running the
-simulation.
+**What changed:**
+The original `RunAnalytics` object (8 fields) was replaced with an expanded
+set (16 fields) following a review that identified the original metrics as
+insufficiently actionable for fire response teams.
 
-Phase 1 analytics: high-risk cell count, high-risk area in hectares,
-top-5 ignition seed cells by burn frequency, dominant vegetation type among
-high-risk cells.
+**Fields removed:**
 
-Phase 2 analytics: final burned area in hectares, average rate of spread in
-hectares per hour, generation count, perimeter boundary cell count.
+- `averageRosHectaresPerHour` — whole-run mean hid dangerous early-spread
+  behaviour behind a single averaged number.
 
-Fields not applicable to the current phase are serialised as JSON `null` —
-they are never suppressed. This makes the distinction between "not applicable"
-and "zero" explicit in the API response.
+**Fields added (Phase 1):**
 
-**Why:** Post-review feedback identified that returning only risk arrays and
-perimeter polygons was not actionable without interpretation. Analytics derive
-entirely from data already computed during the simulation run — no new data
-sources, no new endpoints, and no second simulation pass are required.
+- `highRiskAreaByVegetationType` — hectares per fuel type among high-risk cells.
+  Officers need to know whether risk is forest or grassland — response differs.
+- `topIgnitionSeedScores` — parallel scores for `topIgnitionSeeds`.
+  Seeds without scores are uninterpretable; officers cannot act on a cell index
+  without knowing whether the risk is 0.94 or 0.51.
+- `simulatedHorizonHours` — confirms the forecast window the heatmap covers.
+
+**Fields added (Phase 2):**
+
+- `burnedAreaByVegetationType` — hectares consumed per fuel type.
+  Forest loss triggers KWS involvement; grassland does not.
+- `peakRosHectaresPerHour` — maximum single-step rate of spread in ha/hr.
+  This is the primary figure for evacuation decisions.
+- `stepAtPeakRos` — generation index at which peak ROS occurred.
+  Tells officers whether dangerous spread was wind-driven from the start or
+  mid-run (fire reaching dry fuel at the forest boundary).
+- `perimeterLengthMetres` — `perimeterCellCountFinal × cellSizeMetres`.
+  Directly usable for resource deployment; raw cell counts are not.
+- `naturalBarrierCellsEncountered` — NON_COMBUSTIBLE cells adjacent to BURNED
+  area. Approximates how much perimeter is naturally contained.
+- `simulatedDurationHours` — makes stored run records self-explaining.
+
+**Why:**
+Post-implementation review identified that raw risk arrays and perimeter
+polygons alone are not actionable without interpretation. All new metrics
+derive entirely from data already present at simulation completion — no new
+data sources, no new endpoints, no second simulation pass.
 
 **Groups affected:**
 
-- 9 (output — new `RunAnalytics`, `RunAnalyticsService`; `SimulationResultAssemblerService`
-  updated to accept and attach analytics)
-- 10 (history — `RunRecord` gains `RunAnalytics analytics` field)
-- 11 (dto — both response DTOs gain `RunAnalytics analytics` field)
-- 12 (facade — compute analytics once after simulation, pass to both assembler
-  and run-record writer)
+- 9 (output — `RunAnalytics`, `RunAnalyticsService`, tests)
+- 10 (history — `RunRecord.analytics` field must now serialise the expanded object;
+  no constructor change needed if the field type remains `RunAnalytics`)
+- 11 (dto — `PhaseOneResultResponse.analytics` and `PhaseTwoResultResponse.analytics`
+  already typed as `RunAnalytics`; no change to the DTO classes themselves)
+- 12 (facade — no change to call sites; `RunAnalyticsService` method signatures
+  are unchanged)

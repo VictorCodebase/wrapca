@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.*;
@@ -24,15 +25,12 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link RunAnalyticsService}.
  * <p>
- * {@link SimulationConfig} is mocked so tests control cell size and time-step
- * precisely without relying on application.properties.
+ * SimulationConfig is mocked so tests control cell size and time-step precisely.
+ * All @BeforeEach stubs use lenient() because not every test in the nested class
+ * reaches the lines that read cellSizeMetres or timeStepMinutes.
  * <p>
- * Tests are organised into:
- * - Phase 1: highRiskCellCount, highRiskAreaHectares, topIgnitionSeeds,
- * dominantVegetationType, null Phase 2 fields, error paths
- * - Phase 2: finalBurnedAreaHectares, averageRosHectaresPerHour,
- * generationsRun, perimeterCellCountFinal, empty steps,
- * null Phase 1 fields
+ * Cell size 100m is chosen throughout Phase 1 tests because 100×100 = 10 000 m²
+ * = exactly 1 ha, making area arithmetic trivially verifiable by inspection.
  */
 @DisplayName("RunAnalyticsService")
 @ExtendWith(MockitoExtension.class)
@@ -43,17 +41,9 @@ class RunAnalyticsServiceTest {
 
 	private RunAnalyticsService analyticsService;
 
-	/**
-	 * 100m cell: 100×100 = 10 000 m² = 1 ha. Makes area arithmetic trivial to verify.
-	 */
-	private static final double CELL_SIZE_100M = 100.0;
-
-	/**
-	 * 200m cell: 200×200 = 40 000 m² = 4 ha per cell.
-	 */
-	private static final double CELL_SIZE_200M = 200.0;
-
-	private static final int TIME_STEP_MINUTES = 5;
+	private static final double CELL_100M = 100.0;   // 1 ha per cell
+	private static final double CELL_200M = 200.0;   // 4 ha per cell
+	private static final int TIME_STEP = 5;       // minutes
 
 	@BeforeEach
 	void setUp() {
@@ -70,265 +60,254 @@ class RunAnalyticsServiceTest {
 
 		@BeforeEach
 		void stubConfig() {
-			// lenient: tests that hit the mismatch early-return path never call
-			// getCellSizeMetres(), so the stub would be flagged as unused by
-			// Mockito strict mode. lenient() is correct here — this is shared
-			// @BeforeEach setup that not every test in the nested class exercises.
-			lenient().when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_SIZE_100M);
+			lenient().when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_100M);
+			lenient().when(simulationConfig.getPhase1HorizonHours()).thenReturn(24);
 		}
 
 		// --- highRiskCellCount ---
 
 		@Test
-		@DisplayName("highRiskCellCount: cells at or above p75 are counted")
-		void highRiskCellCount_atOrAboveP75() {
-			// 4 cells, values 0.1 0.2 0.3 0.4 → sorted: [0.1,0.2,0.3,0.4]
-			// p75 nearest-rank: ceil(0.75*4)-1 = idx 2 → value 0.3
+		@DisplayName("cells at or above p75 are counted as high-risk")
+		void highRiskCount_atOrAboveP75() {
+			// sorted: [0.1, 0.2, 0.3, 0.4] → p75 idx = ceil(0.75*4)-1 = 2 → value 0.3
 			// cells >= 0.3: indices 2 and 3 → count 2
 			CaGrid grid = GridTestFactory.allUnburned(2, 2);
 			float[] dp = {0.1f, 0.2f, 0.3f, 0.4f};
-			float[] ip = new float[4];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 100);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 100);
 
-			assertThat(result.getHighRiskCellCount()).isEqualTo(2);
+			assertThat(r.getHighRiskCellCount()).isEqualTo(2);
 		}
 
 		@Test
-		@DisplayName("highRiskCellCount: all cells identical → all are high-risk")
-		void highRiskCellCount_uniformValues_allHighRisk() {
+		@DisplayName("uniform values: all cells qualify as high-risk")
+		void highRiskCount_uniformValues_allHighRisk() {
 			CaGrid grid = GridTestFactory.allUnburned(2, 2);
 			float[] dp = {0.5f, 0.5f, 0.5f, 0.5f};
-			float[] ip = new float[4];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 100);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 100);
 
-			assertThat(result.getHighRiskCellCount()).isEqualTo(4);
+			assertThat(r.getHighRiskCellCount()).isEqualTo(4);
 		}
 
 		@Test
-		@DisplayName("highRiskCellCount: all-zero values → all cells at p75 → all high-risk")
-		void highRiskCellCount_allZero_allHighRisk() {
-			CaGrid grid = GridTestFactory.allUnburned(1, 4);
-			float[] dp = {0f, 0f, 0f, 0f};
-			float[] ip = new float[4];
-
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 100);
-
-			assertThat(result.getHighRiskCellCount()).isEqualTo(4);
-		}
-
-		@Test
-		@DisplayName("highRiskCellCount: single cell → that cell is high-risk")
-		void highRiskCellCount_singleCell() {
+		@DisplayName("single cell: that cell is always high-risk")
+		void highRiskCount_singleCell() {
 			CaGrid grid = GridTestFactory.allUnburned(1, 1);
-			float[] dp = {0.7f};
-			float[] ip = new float[1];
-
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 1);
-
-			assertThat(result.getHighRiskCellCount()).isEqualTo(1);
+			RunAnalytics r = analyticsService.summarisePhaseOne(
+				new float[]{0.7f}, new float[1], grid, 1);
+			assertThat(r.getHighRiskCellCount()).isEqualTo(1);
 		}
 
 		// --- highRiskAreaHectares ---
 
 		@Test
-		@DisplayName("highRiskAreaHectares: 100m cells, 2 high-risk cells = 2 ha")
+		@DisplayName("100m cells, 2 high-risk cells = 2.0 ha")
 		void highRiskArea_100mCells_twoHighRisk() {
-			// dp = [0.1, 0.2, 0.3, 0.4] → 2 high-risk cells × 1 ha = 2.0 ha
 			CaGrid grid = GridTestFactory.allUnburned(2, 2);
-			float[] dp = {0.1f, 0.2f, 0.3f, 0.4f};
-			float[] ip = new float[4];
+			float[] dp = {0.1f, 0.2f, 0.3f, 0.4f}; // 2 high-risk cells
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 100);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 100);
 
-			assertThat(result.getHighRiskAreaHectares()).isEqualTo(2.0);
+			assertThat(r.getHighRiskAreaHectares()).isEqualTo(2.0);
 		}
 
 		@Test
-		@DisplayName("highRiskAreaHectares: 200m cells, 1 high-risk cell = 4 ha")
+		@DisplayName("200m cells, 1 high-risk cell = 4.0 ha")
 		void highRiskArea_200mCells() {
-			when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_SIZE_200M);
+			lenient().when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_200M);
 			CaGrid grid = GridTestFactory.allUnburned(1, 1);
-			float[] dp = {1.0f};
-			float[] ip = new float[1];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 1);
+			RunAnalytics r = analyticsService.summarisePhaseOne(
+				new float[]{1.0f}, new float[1], grid, 1);
 
-			assertThat(result.getHighRiskAreaHectares()).isEqualTo(4.0);
+			assertThat(r.getHighRiskAreaHectares()).isEqualTo(4.0);
+		}
+
+		// --- highRiskAreaByVegetationType ---
+
+		@Test
+		@DisplayName("area breakdown key set matches vegetation types present in high-risk cells")
+		void highRiskAreaByVeg_keySet() {
+			// dp = [0.1, 0.2, 0.9, 0.8] → high-risk = indices 2 and 3 (row 1)
+			// row 1 veg: GRASSLAND
+			CaGrid grid = GridTestFactory.withVegGrid(2, 2,
+				(r, c) -> r == 0 ? VegetationTypeEnum.SHRUBLAND : VegetationTypeEnum.GRASSLAND);
+			float[] dp = {0.1f, 0.2f, 0.9f, 0.8f};
+
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 10);
+
+			Map<String, Double> byVeg = r.getHighRiskAreaByVegetationType();
+			assertThat(byVeg).containsKey("GRASSLAND");
+			assertThat(byVeg).doesNotContainKey("SHRUBLAND");
 		}
 
 		@Test
-		@DisplayName("highRiskAreaHectares: zero high-risk cells = 0.0 ha")
-		void highRiskArea_zero() {
-			// Force a scenario where no cells exceed p75 isn't possible with nearest-rank,
-			// but a 1-cell grid guarantees exactly 1 high-risk cell (1.0 ha).
-			// Test that the formula is applied: 1 cell × 1 ha = 1.0
-			CaGrid grid = GridTestFactory.allUnburned(1, 1);
-			float[] dp = {0.5f};
-			float[] ip = new float[1];
+		@DisplayName("area breakdown values sum to highRiskAreaHectares")
+		void highRiskAreaByVeg_sumMatchesTotal() {
+			CaGrid grid = GridTestFactory.withVegGrid(2, 2,
+				(r, c) -> r == 0 ? VegetationTypeEnum.SHRUBLAND : VegetationTypeEnum.GRASSLAND);
+			float[] dp = {0.9f, 0.8f, 0.7f, 0.6f}; // all high-risk (uniform p75 = 0.6)
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 1);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 10);
 
-			assertThat(result.getHighRiskAreaHectares()).isEqualTo(1.0);
+			double sum = r.getHighRiskAreaByVegetationType().values()
+				.stream().mapToDouble(Double::doubleValue).sum();
+			assertThat(sum).isCloseTo(r.getHighRiskAreaHectares(), within(1e-6));
 		}
 
-		// --- topIgnitionSeeds ---
+		// --- topIgnitionSeeds and topIgnitionSeedScores ---
 
 		@Test
-		@DisplayName("topIgnitionSeeds: returns at most 5 seeds")
+		@DisplayName("topIgnitionSeeds: at most 5 returned")
 		void topSeeds_atMostFive() {
 			CaGrid grid = GridTestFactory.allUnburned(2, 5); // 10 cells
 			float[] dp = {0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.4f, 0.3f, 0.2f, 0.1f, 0.05f};
-			float[] ip = new float[10];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 100);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[10], grid, 100);
 
-			assertThat(result.getTopIgnitionSeeds()).hasSize(5);
+			assertThat(r.getTopIgnitionSeeds()).hasSize(5);
 		}
 
 		@Test
-		@DisplayName("topIgnitionSeeds: fewer than 5 cells returns all of them")
-		void topSeeds_fewerThanFive() {
-			CaGrid grid = GridTestFactory.allUnburned(1, 3);
-			float[] dp = {0.9f, 0.5f, 0.1f};
-			float[] ip = new float[3];
-
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 10);
-
-			assertThat(result.getTopIgnitionSeeds()).hasSize(3);
-		}
-
-		@Test
-		@DisplayName("topIgnitionSeeds: seeds are in descending order of damage potential")
-		void topSeeds_descendingOrder() {
-			// 1x4 grid, values in ascending order — top seed should be index 3 (highest value)
+		@DisplayName("topIgnitionSeeds and topIgnitionSeedScores are parallel")
+		void topSeeds_parallelScores() {
 			CaGrid grid = GridTestFactory.allUnburned(1, 4);
 			float[] dp = {0.1f, 0.2f, 0.8f, 0.5f};
-			float[] ip = new float[4];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 10);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 10);
 
-			List<Long> seeds = result.getTopIgnitionSeeds();
-			// First seed should encode the cell with dp=0.8 (flat index 2, row=0 col=2 → 0*4+2=2)
-			assertThat(seeds.get(0)).isEqualTo(2L);
-			// Second seed: dp=0.5 at index 3 → 3L
-			assertThat(seeds.get(1)).isEqualTo(3L);
+			assertThat(r.getTopIgnitionSeeds()).hasSameSizeAs(r.getTopIgnitionSeedScores());
+		}
+
+		@Test
+		@DisplayName("topIgnitionSeeds: first seed is the cell with the highest dp value")
+		void topSeeds_firstIsHighest() {
+			// dp=0.8 is at flat index 2 (row=0, col=2) in a 1×4 grid → encoded = 2
+			CaGrid grid = GridTestFactory.allUnburned(1, 4);
+			float[] dp = {0.1f, 0.2f, 0.8f, 0.5f};
+
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 10);
+
+			assertThat(r.getTopIgnitionSeeds().get(0)).isEqualTo(2L);
+		}
+
+		@Test
+		@DisplayName("topIgnitionSeedScores: first score matches the highest dp value")
+		void topSeedScores_firstMatchesHighest() {
+			CaGrid grid = GridTestFactory.allUnburned(1, 4);
+			float[] dp = {0.1f, 0.2f, 0.8f, 0.5f};
+
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 10);
+
+			assertThat(r.getTopIgnitionSeedScores().get(0)).isCloseTo(0.8, within(1e-5));
 		}
 
 		@Test
 		@DisplayName("topIgnitionSeeds: encoded as row*cols+col")
 		void topSeeds_encoding() {
-			// 3x3 grid; highest value at (row=2, col=1) → encoded = 2*3+1 = 7
+			// 3x3 grid; highest dp at flat index 7 (row=2, col=1) → encoded = 2*3+1 = 7
 			CaGrid grid = GridTestFactory.allUnburned(3, 3);
 			float[] dp = new float[9];
-			dp[7] = 1.0f; // row=2, col=1
-			float[] ip = new float[9];
+			dp[7] = 1.0f;
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 10);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[9], grid, 10);
 
-			assertThat(result.getTopIgnitionSeeds().get(0)).isEqualTo(7L);
+			assertThat(r.getTopIgnitionSeeds().get(0)).isEqualTo(7L);
 		}
 
 		@Test
-		@DisplayName("topIgnitionSeeds: single cell grid returns one seed")
-		void topSeeds_singleCell() {
-			CaGrid grid = GridTestFactory.allUnburned(1, 1);
-			float[] dp = {0.99f};
-			float[] ip = new float[1];
-
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 1);
-
-			assertThat(result.getTopIgnitionSeeds()).containsExactly(0L);
+		@DisplayName("fewer than 5 cells: returns all of them")
+		void topSeeds_fewerThanFive() {
+			CaGrid grid = GridTestFactory.allUnburned(1, 3);
+			RunAnalytics r = analyticsService.summarisePhaseOne(
+				new float[]{0.9f, 0.5f, 0.1f}, new float[3], grid, 10);
+			assertThat(r.getTopIgnitionSeeds()).hasSize(3);
 		}
 
 		// --- dominantVegetationType ---
 
 		@Test
-		@DisplayName("dominantVegetationType: most frequent veg type among high-risk cells")
-		void dominantVeg_mostFrequent() {
-			// 2x2 grid; dp = [0.1, 0.2, 0.9, 0.8] → high-risk cells at indices 2 and 3
-			// veg: (0,0)=SHRUBLAND, (0,1)=SHRUBLAND, (1,0)=GRASSLAND, (1,1)=GRASSLAND
-			// high-risk indices 2 and 3 map to row=1 → both GRASSLAND
-			CaGrid grid = GridTestFactory.withVegGrid(2, 2, (r, c) ->
-				r == 0 ? VegetationTypeEnum.SHRUBLAND : VegetationTypeEnum.GRASSLAND);
+		@DisplayName("dominant type is the vegetation with the most high-risk area")
+		void dominantVeg_mostArea() {
+			// high-risk cells are row 1 (both GRASSLAND)
+			CaGrid grid = GridTestFactory.withVegGrid(2, 2,
+				(r, c) -> r == 0 ? VegetationTypeEnum.SHRUBLAND : VegetationTypeEnum.GRASSLAND);
 			float[] dp = {0.1f, 0.2f, 0.9f, 0.8f};
-			float[] ip = new float[4];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 10);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 10);
 
-			assertThat(result.getDominantVegetationType()).isEqualTo("GRASSLAND");
+			assertThat(r.getDominantVegetationType()).isEqualTo("GRASSLAND");
 		}
 
 		@Test
-		@DisplayName("dominantVegetationType: tie broken by lower ordinal")
+		@DisplayName("tie in area: lower ordinal wins")
 		void dominantVeg_tieBrokenByLowerOrdinal() {
-			// 4 cells all high-risk (uniform value): 2 × GRASSLAND (ordinal 1) and 2 × SHRUBLAND (ordinal 2)
-			// Tie: GRASSLAND wins (lower ordinal)
-			CaGrid grid = GridTestFactory.withVegGrid(2, 2, (r, c) ->
-				(r == 0) ? VegetationTypeEnum.GRASSLAND : VegetationTypeEnum.SHRUBLAND);
+			// all 4 cells high-risk: 2 × GRASSLAND (ordinal 1), 2 × SHRUBLAND (ordinal 2)
+			CaGrid grid = GridTestFactory.withVegGrid(2, 2,
+				(r, c) -> r == 0 ? VegetationTypeEnum.GRASSLAND : VegetationTypeEnum.SHRUBLAND);
 			float[] dp = {1.0f, 1.0f, 1.0f, 1.0f};
-			float[] ip = new float[4];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 10);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 10);
 
-			assertThat(result.getDominantVegetationType()).isEqualTo("GRASSLAND");
+			assertThat(r.getDominantVegetationType()).isEqualTo("GRASSLAND");
 		}
 
+		// --- simulatedHorizonHours ---
+
 		@Test
-		@DisplayName("dominantVegetationType: single cell returns that cell's type")
-		void dominantVeg_singleCell() {
-			CaGrid grid = GridTestFactory.uniformVeg(1, 1, VegetationTypeEnum.AFROMONTANE_FOREST);
-			float[] dp = {0.5f};
-			float[] ip = new float[1];
+		@DisplayName("simulatedHorizonHours comes from SimulationConfig.getPhase1HorizonHours")
+		void horizonHours_fromConfig() {
+			lenient().when(simulationConfig.getPhase1HorizonHours()).thenReturn(48);
+			CaGrid grid = GridTestFactory.allUnburned(1, 1);
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 1);
+			RunAnalytics r = analyticsService.summarisePhaseOne(
+				new float[]{0.5f}, new float[1], grid, 1);
 
-			assertThat(result.getDominantVegetationType()).isEqualTo("AFROMONTANE_FOREST");
+			assertThat(r.getSimulatedHorizonHours()).isEqualTo(48.0);
 		}
 
 		// --- Phase 2 fields are null ---
 
 		@Test
 		@DisplayName("all Phase 2 fields are null on a Phase 1 result")
-		void phase2Fields_areNull() {
+		void phase2Fields_null() {
 			CaGrid grid = GridTestFactory.allUnburned(2, 2);
 			float[] dp = {0.1f, 0.2f, 0.3f, 0.4f};
-			float[] ip = new float[4];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 100);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 100);
 
-			assertThat(result.getFinalBurnedAreaHectares()).isNull();
-			assertThat(result.getAverageRosHectaresPerHour()).isNull();
-			assertThat(result.getGenerationsRun()).isNull();
-			assertThat(result.getPerimeterCellCountFinal()).isNull();
+			assertThat(r.getFinalBurnedAreaHectares()).isNull();
+			assertThat(r.getBurnedAreaByVegetationType()).isNull();
+			assertThat(r.getPeakRosHectaresPerHour()).isNull();
+			assertThat(r.getStepAtPeakRos()).isNull();
+			assertThat(r.getPerimeterLengthMetres()).isNull();
+			assertThat(r.getPerimeterCellCountFinal()).isNull();
+			assertThat(r.getNaturalBarrierCellsEncountered()).isNull();
+			assertThat(r.getSimulatedDurationHours()).isNull();
+			assertThat(r.getGenerationsRun()).isNull();
 		}
 
-		// --- error path: array/grid size mismatch ---
+		// --- error path ---
 
 		@Test
-		@DisplayName("array length mismatch returns all-null analytics without throwing")
+		@DisplayName("array/grid size mismatch returns all-null analytics without throwing")
 		void mismatch_returnsNullAnalytics() {
 			CaGrid grid = GridTestFactory.allUnburned(2, 2); // expects 4
 			float[] dp = new float[3]; // wrong
-			float[] ip = new float[4];
 
-			RunAnalytics result = analyticsService.summarisePhaseOne(dp, ip, grid, 100);
+			RunAnalytics r = analyticsService.summarisePhaseOne(dp, new float[4], grid, 100);
 
-			assertThat(result.getHighRiskCellCount()).isNull();
-			assertThat(result.getHighRiskAreaHectares()).isNull();
-			assertThat(result.getTopIgnitionSeeds()).isNull();
-			assertThat(result.getDominantVegetationType()).isNull();
+			assertThat(r.getHighRiskCellCount()).isNull();
+			assertThat(r.getHighRiskAreaHectares()).isNull();
 		}
 
 		@Test
-		@DisplayName("array length mismatch does not throw")
+		@DisplayName("array/grid size mismatch does not throw")
 		void mismatch_doesNotThrow() {
 			CaGrid grid = GridTestFactory.allUnburned(3, 3);
-			float[] dp = new float[5]; // wrong — should be 9
-			float[] ip = new float[9];
-
-			assertThatCode(() -> analyticsService.summarisePhaseOne(dp, ip, grid, 100))
+			assertThatCode(() ->
+				analyticsService.summarisePhaseOne(new float[5], new float[9], grid, 100))
 				.doesNotThrowAnyException();
 		}
 	}
@@ -343,12 +322,8 @@ class RunAnalyticsServiceTest {
 
 		@BeforeEach
 		void stubConfig() {
-			// lenient: tests that check early-return paths (empty steps, null fields,
-			// generationsRun only) never call getCellSizeMetres() or getTimeStepMinutes(),
-			// so strict mode would flag them as unused. lenient() is the right choice
-			// for shared @BeforeEach setup that not every test in the nested class uses.
-			lenient().when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_SIZE_100M);
-			lenient().when(simulationConfig.getTimeStepMinutes()).thenReturn(TIME_STEP_MINUTES);
+			lenient().when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_100M);
+			lenient().when(simulationConfig.getTimeStepMinutes()).thenReturn(TIME_STEP);
 		}
 
 		// --- generationsRun ---
@@ -357,45 +332,43 @@ class RunAnalyticsServiceTest {
 		@DisplayName("generationsRun equals steps.size()")
 		void generationsRun_equalsStepCount() {
 			CaGrid grid = GridTestFactory.allUnburned(3, 3);
-			List<SimulationStepResult> steps = List.of(
-				stubStep(), stubStep(), stubStep());
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(steps, grid, simulationConfig);
-
-			assertThat(result.getGenerationsRun()).isEqualTo(3);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0), stubStep(1), stubStep(2)), grid, simulationConfig);
+			assertThat(r.getGenerationsRun()).isEqualTo(3);
 		}
 
 		@Test
-		@DisplayName("generationsRun is 0 when steps list is empty")
+		@DisplayName("generationsRun is 0 for empty steps list")
 		void generationsRun_emptySteps() {
-			CaGrid grid = GridTestFactory.allUnburned(3, 3);
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(List.of(), grid, simulationConfig);
-
-			assertThat(result.getGenerationsRun()).isEqualTo(0);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(), GridTestFactory.allUnburned(3, 3), simulationConfig);
+			assertThat(r.getGenerationsRun()).isEqualTo(0);
 		}
 
-		// --- empty steps: all non-generationsRun fields are null ---
+		// --- empty steps: all other Phase 2 fields are null ---
 
 		@Test
-		@DisplayName("empty steps returns null for all Phase 2 fields except generationsRun")
-		void emptySteps_nullFieldsExceptGenerations() {
-			CaGrid grid = GridTestFactory.allUnburned(3, 3);
+		@DisplayName("empty steps: all Phase 2 fields null except generationsRun")
+		void emptySteps_otherFieldsNull() {
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(), GridTestFactory.allUnburned(2, 2), simulationConfig);
 
-			RunAnalytics result = analyticsService.summarisePhaseTwo(List.of(), grid, simulationConfig);
-
-			assertThat(result.getFinalBurnedAreaHectares()).isNull();
-			assertThat(result.getAverageRosHectaresPerHour()).isNull();
-			assertThat(result.getPerimeterCellCountFinal()).isNull();
+			assertThat(r.getFinalBurnedAreaHectares()).isNull();
+			assertThat(r.getBurnedAreaByVegetationType()).isNull();
+			assertThat(r.getPeakRosHectaresPerHour()).isNull();
+			assertThat(r.getStepAtPeakRos()).isNull();
+			assertThat(r.getPerimeterLengthMetres()).isNull();
+			assertThat(r.getPerimeterCellCountFinal()).isNull();
+			assertThat(r.getNaturalBarrierCellsEncountered()).isNull();
+			assertThat(r.getSimulatedDurationHours()).isNull();
 		}
 
 		// --- finalBurnedAreaHectares ---
 
 		@Test
-		@DisplayName("finalBurnedAreaHectares: counts only BURNED cells, not BURNING")
-		void burnedArea_countsOnlyBurnedNotBurning() {
-			// 3 cells: BURNED, BURNING, UNBURNED — only the BURNED cell contributes
-			// 100m cells: 1 BURNED cell = 1 ha
+		@DisplayName("only BURNED cells count toward burned area — BURNING excluded")
+		void burnedArea_burnedOnlyNotBurning() {
+			// col0=BURNED(1 ha), col1=BURNING, col2=UNBURNED
 			CaGrid grid = GridTestFactory.build(1, 3,
 				(r, c) -> switch (c) {
 					case 0 -> CellStateEnum.BURNED;
@@ -404,158 +377,222 @@ class RunAnalyticsServiceTest {
 				},
 				(r, c) -> GridTestFactory.DEFAULT_VEG);
 
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
 
-			assertThat(result.getFinalBurnedAreaHectares()).isEqualTo(1.0);
+			assertThat(r.getFinalBurnedAreaHectares()).isEqualTo(1.0);
 		}
 
 		@Test
-		@DisplayName("finalBurnedAreaHectares: zero when no cells are BURNED")
-		void burnedArea_zero_whenNoBurnedCells() {
-			CaGrid grid = GridTestFactory.allUnburned(3, 3);
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getFinalBurnedAreaHectares()).isEqualTo(0.0);
-		}
-
-		@Test
-		@DisplayName("finalBurnedAreaHectares: all cells BURNED = rows*cols ha (at 100m)")
+		@DisplayName("all-BURNED 3×4 grid = 12.0 ha at 100m cells")
 		void burnedArea_allBurned() {
-			CaGrid grid = GridTestFactory.uniformState(3, 4, CellStateEnum.BURNED); // 12 cells = 12 ha
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getFinalBurnedAreaHectares()).isEqualTo(12.0);
-		}
-
-		@Test
-		@DisplayName("finalBurnedAreaHectares: scales with cell size — 200m cells are 4x larger")
-		void burnedArea_scalesWithCellSize() {
-			when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_SIZE_200M);
-			CaGrid grid = GridTestFactory.uniformState(1, 1, CellStateEnum.BURNED); // 1 cell = 4 ha
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getFinalBurnedAreaHectares()).isEqualTo(4.0);
-		}
-
-		// --- averageRosHectaresPerHour ---
-
-		@Test
-		@DisplayName("averageRos: null when fewer than 2 generations ran")
-		void averageRos_nullForSingleGeneration() {
-			CaGrid grid = GridTestFactory.uniformState(2, 2, CellStateEnum.BURNED);
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getAverageRosHectaresPerHour()).isNull();
-		}
-
-		@Test
-		@DisplayName("averageRos: computed correctly for 2+ generations")
-		void averageRos_computedForTwoGenerations() {
-			// 12 burned cells × 1 ha = 12 ha
-			// 2 generations × 5 min = 10 min = 10/60 hours
-			// averageRos = 12 / (10/60) = 72 ha/hr
 			CaGrid grid = GridTestFactory.uniformState(3, 4, CellStateEnum.BURNED);
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep(), stubStep()), grid, simulationConfig);
-
-			assertThat(result.getAverageRosHectaresPerHour())
-				.isCloseTo(72.0, within(0.001));
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+			assertThat(r.getFinalBurnedAreaHectares()).isEqualTo(12.0);
 		}
 
 		@Test
-		@DisplayName("averageRos: zero burned area gives 0.0 ha/hr (not NaN or error)")
-		void averageRos_zeroBurnedArea() {
-			CaGrid grid = GridTestFactory.allUnburned(3, 3); // no burned cells
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep(), stubStep()), grid, simulationConfig);
-
-			assertThat(result.getAverageRosHectaresPerHour()).isEqualTo(0.0);
+		@DisplayName("200m cells: burned area scales correctly (4 ha per cell)")
+		void burnedArea_200mCell() {
+			lenient().when(simulationConfig.getCellSizeMetres()).thenReturn(CELL_200M);
+			CaGrid grid = GridTestFactory.uniformState(1, 1, CellStateEnum.BURNED);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+			assertThat(r.getFinalBurnedAreaHectares()).isEqualTo(4.0);
 		}
 
-		// --- perimeterCellCountFinal ---
+		// --- burnedAreaByVegetationType ---
 
 		@Test
-		@DisplayName("perimeterCellCountFinal: interior all-BURNED cell is not a boundary cell")
-		void perimeterCount_interiorCellExcluded() {
-			// 3x3 all BURNED: only outer 8 cells are boundary; centre is not
+		@DisplayName("burned area breakdown key set matches veg types of BURNED cells")
+		void burnedByVeg_keySet() {
+			// row 0 = BURNED GRASSLAND, row 1 = UNBURNED SHRUBLAND
+			CaGrid grid = GridTestFactory.build(2, 2,
+				(r, c) -> r == 0 ? CellStateEnum.BURNED : CellStateEnum.UNBURNED,
+				(r, c) -> r == 0 ? VegetationTypeEnum.GRASSLAND : VegetationTypeEnum.SHRUBLAND);
+
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+
+			assertThat(r.getBurnedAreaByVegetationType()).containsKey("GRASSLAND");
+			assertThat(r.getBurnedAreaByVegetationType()).doesNotContainKey("SHRUBLAND");
+		}
+
+		@Test
+		@DisplayName("burned area breakdown values sum to finalBurnedAreaHectares")
+		void burnedByVeg_sumMatchesTotal() {
+			CaGrid grid = GridTestFactory.build(2, 2,
+				(r, c) -> CellStateEnum.BURNED,
+				(r, c) -> r == 0 ? VegetationTypeEnum.GRASSLAND : VegetationTypeEnum.SHRUBLAND);
+
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+
+			double sum = r.getBurnedAreaByVegetationType().values()
+				.stream().mapToDouble(Double::doubleValue).sum();
+			assertThat(sum).isCloseTo(r.getFinalBurnedAreaHectares(), within(1e-6));
+		}
+
+		// --- peakRosHectaresPerHour and stepAtPeakRos ---
+
+		@Test
+		@DisplayName("peakRos is null for single generation (< 2 required)")
+		void peakRos_nullForOneGeneration() {
+			CaGrid grid = GridTestFactory.allUnburned(3, 3);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+			assertThat(r.getPeakRosHectaresPerHour()).isNull();
+			assertThat(r.getStepAtPeakRos()).isNull();
+		}
+
+		@Test
+		@DisplayName("peakRos: identifies the generation with the most newly ignited cells")
+		void peakRos_identifiesPeakStep() {
+			// step 0: 1 ignited, step 1: 5 ignited — peak is step 1
+			CaGrid grid = GridTestFactory.allUnburned(5, 5);
+			SimulationStepResult step0 = stubStepWithIgnitions(0, Set.of(1L));
+			SimulationStepResult step1 = stubStepWithIgnitions(1, Set.of(2L, 3L, 4L, 5L, 6L));
+
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(step0, step1), grid, simulationConfig);
+
+			assertThat(r.getStepAtPeakRos()).isEqualTo(1);
+		}
+
+		@Test
+		@DisplayName("peakRos value: 1 cell ignited per 5-min step at 100m = 12 ha/hr")
+		void peakRos_value() {
+			// 1 cell × 1 ha / (5 min / 60) = 1 / 0.08333 = 12.0 ha/hr
+			CaGrid grid = GridTestFactory.allUnburned(3, 3);
+			SimulationStepResult step0 = stubStepWithIgnitions(0, Set.of(1L));
+			SimulationStepResult step1 = stubStepWithIgnitions(1, Set.of(2L));
+
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(step0, step1), grid, simulationConfig);
+
+			assertThat(r.getPeakRosHectaresPerHour()).isCloseTo(12.0, within(0.01));
+		}
+
+		// --- perimeterLengthMetres ---
+
+		@Test
+		@DisplayName("perimeterLengthMetres = perimeterCellCountFinal × cellSizeMetres")
+		void perimeterLength_formula() {
+			CaGrid grid = GridTestFactory.uniformState(3, 3, CellStateEnum.BURNED);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+
+			int count = r.getPerimeterCellCountFinal();
+			double expectedMetres = count * CELL_100M;
+			assertThat(r.getPerimeterLengthMetres()).isEqualTo(expectedMetres);
+		}
+
+		@Test
+		@DisplayName("3×3 all-BURNED: 8 boundary cells = 800m perimeter at 100m")
+		void perimeterLength_threeByThree() {
+			CaGrid grid = GridTestFactory.uniformState(3, 3, CellStateEnum.BURNED);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+
+			assertThat(r.getPerimeterCellCountFinal()).isEqualTo(8);
+			assertThat(r.getPerimeterLengthMetres()).isEqualTo(800.0);
+		}
+
+		@Test
+		@DisplayName("1×1 BURNED: 1 boundary cell = 100m perimeter")
+		void perimeterLength_singleCell() {
+			CaGrid grid = GridTestFactory.singleCell(CellStateEnum.BURNED);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+
+			assertThat(r.getPerimeterCellCountFinal()).isEqualTo(1);
+			assertThat(r.getPerimeterLengthMetres()).isEqualTo(100.0);
+		}
+
+		// --- naturalBarrierCellsEncountered ---
+
+		@Test
+		@DisplayName("NON_COMBUSTIBLE cell adjacent to BURNED cell is a natural barrier")
+		void naturalBarriers_counted() {
+			// 1×2: col0=BURNED, col1=NON_COMBUSTIBLE
+			CaGrid grid = GridTestFactory.build(1, 2,
+				(r, c) -> c == 0 ? CellStateEnum.BURNED : CellStateEnum.NON_COMBUSTIBLE,
+				(r, c) -> GridTestFactory.DEFAULT_VEG);
+
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+
+			assertThat(r.getNaturalBarrierCellsEncountered()).isEqualTo(1);
+		}
+
+		@Test
+		@DisplayName("NON_COMBUSTIBLE cell not adjacent to any BURNED cell is not a barrier")
+		void naturalBarriers_notAdjacentToFire_notCounted() {
+			// 1×3: col0=UNBURNED, col1=UNBURNED, col2=NON_COMBUSTIBLE — no burned cells
+			CaGrid grid = GridTestFactory.build(1, 3,
+				(r, c) -> c == 2 ? CellStateEnum.NON_COMBUSTIBLE : CellStateEnum.UNBURNED,
+				(r, c) -> GridTestFactory.DEFAULT_VEG);
+
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
+
+			assertThat(r.getNaturalBarrierCellsEncountered()).isEqualTo(0);
+		}
+
+		@Test
+		@DisplayName("no barriers when no NON_COMBUSTIBLE cells exist")
+		void naturalBarriers_none() {
 			CaGrid grid = GridTestFactory.uniformState(3, 3, CellStateEnum.BURNED);
 
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
 
-			assertThat(result.getPerimeterCellCountFinal()).isEqualTo(8);
+			assertThat(r.getNaturalBarrierCellsEncountered()).isEqualTo(0);
+		}
+
+		// --- simulatedDurationHours ---
+
+		@Test
+		@DisplayName("simulatedDurationHours = generationsRun × timeStepMinutes / 60")
+		void duration_formula() {
+			// 6 generations × 5 min = 30 min = 0.5 hr
+			CaGrid grid = GridTestFactory.allUnburned(2, 2);
+			List<SimulationStepResult> steps = List.of(
+				stubStep(0), stubStep(1), stubStep(2),
+				stubStep(3), stubStep(4), stubStep(5));
+
+			RunAnalytics r = analyticsService.summarisePhaseTwo(steps, grid, simulationConfig);
+
+			assertThat(r.getSimulatedDurationHours()).isCloseTo(0.5, within(1e-6));
 		}
 
 		@Test
-		@DisplayName("perimeterCellCountFinal: 1x1 BURNED cell counts as boundary")
-		void perimeterCount_singleBurnedCell() {
-			CaGrid grid = GridTestFactory.singleCell(CellStateEnum.BURNED);
+		@DisplayName("1 generation × 5 min = 0.0833... hours")
+		void duration_oneGeneration() {
+			CaGrid grid = GridTestFactory.allUnburned(2, 2);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
 
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getPerimeterCellCountFinal()).isEqualTo(1);
-		}
-
-		@Test
-		@DisplayName("perimeterCellCountFinal: zero when no fire cells exist")
-		void perimeterCount_noFireCells() {
-			CaGrid grid = GridTestFactory.allUnburned(4, 4);
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getPerimeterCellCountFinal()).isEqualTo(0);
-		}
-
-		@Test
-		@DisplayName("perimeterCellCountFinal: BURNING cells also count as boundary cells")
-		void perimeterCount_burningCellsCount() {
-			// Single BURNING cell surrounded by UNBURNED → boundary
-			CaGrid grid = GridTestFactory.withStateAt(3, 3, 1, 1, CellStateEnum.BURNING);
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getPerimeterCellCountFinal()).isEqualTo(1);
-		}
-
-		@Test
-		@DisplayName("perimeterCellCountFinal: 5x5 all-BURNED outer ring = 16 cells")
-		void perimeterCount_fiveByFiveAllBurned() {
-			CaGrid grid = GridTestFactory.uniformState(5, 5, CellStateEnum.BURNED);
-
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			// 5×5 - 3×3 interior = 25 - 9 = 16 boundary cells
-			assertThat(result.getPerimeterCellCountFinal()).isEqualTo(16);
+			assertThat(r.getSimulatedDurationHours()).isCloseTo(5.0 / 60.0, within(1e-6));
 		}
 
 		// --- Phase 1 fields are null ---
 
 		@Test
 		@DisplayName("all Phase 1 fields are null on a Phase 2 result")
-		void phase1Fields_areNull() {
+		void phase1Fields_null() {
 			CaGrid grid = GridTestFactory.allUnburned(2, 2);
+			RunAnalytics r = analyticsService.summarisePhaseTwo(
+				List.of(stubStep(0)), grid, simulationConfig);
 
-			RunAnalytics result = analyticsService.summarisePhaseTwo(
-				List.of(stubStep()), grid, simulationConfig);
-
-			assertThat(result.getHighRiskCellCount()).isNull();
-			assertThat(result.getHighRiskAreaHectares()).isNull();
-			assertThat(result.getTopIgnitionSeeds()).isNull();
-			assertThat(result.getDominantVegetationType()).isNull();
+			assertThat(r.getHighRiskCellCount()).isNull();
+			assertThat(r.getHighRiskAreaHectares()).isNull();
+			assertThat(r.getHighRiskAreaByVegetationType()).isNull();
+			assertThat(r.getTopIgnitionSeeds()).isNull();
+			assertThat(r.getTopIgnitionSeedScores()).isNull();
+			assertThat(r.getDominantVegetationType()).isNull();
+			assertThat(r.getSimulatedHorizonHours()).isNull();
 		}
 	}
 
@@ -563,14 +600,27 @@ class RunAnalyticsServiceTest {
 	// Helpers
 	// =========================================================================
 
-	private SimulationStepResult stubStep() {
+	/**
+	 * Stub step with no ignitions. Only stubs getGeneration() — the minimum required.
+	 */
+	private SimulationStepResult stubStep(int generation) {
 		SimulationStepResult step = mock(SimulationStepResult.class);
+		lenient().when(step.getGeneration()).thenReturn(generation);
 		lenient().when(step.getNewlyIgnitedCells()).thenReturn(Collections.emptySet());
-		lenient().when(step.getTimestamp()).thenReturn(Instant.now());
 		return step;
 	}
 
-	private static <T extends Comparable<T>> org.assertj.core.data.Offset<Double> within(double delta) {
+	/**
+	 * Stub step with specific newly ignited cells.
+	 */
+	private SimulationStepResult stubStepWithIgnitions(int generation, Set<Long> cells) {
+		SimulationStepResult step = mock(SimulationStepResult.class);
+		when(step.getGeneration()).thenReturn(generation);
+		when(step.getNewlyIgnitedCells()).thenReturn(Collections.unmodifiableSet(cells));
+		return step;
+	}
+
+	private static org.assertj.core.data.Offset<Double> within(double delta) {
 		return org.assertj.core.data.Offset.offset(delta);
 	}
 }

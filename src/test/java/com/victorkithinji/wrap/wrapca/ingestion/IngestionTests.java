@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.*;
  * Unit tests for all Group 4 ingestion services.
  * Each test is self-contained and uses TempDir — no shared state.
  */
-class IngestionTests {
+class IngestionTest {
 
 	// ─── IngestionCacheService ───────────────────────────────────────────────
 
@@ -517,6 +517,34 @@ class IngestionTests {
 			double[][] segment = layer.getSegments().get(0);
 			assertThat(segment[0][0]).isCloseTo(260000.0, within(0.1));
 			assertThat(segment[0][1]).isCloseTo(9860000.0, within(0.1));
+		}
+	}
+
+
+	// ─── IngestionCacheService (fuel risk addition) ───────────────────────────
+
+	@Nested
+	class IngestionCacheServiceFuelRiskTest {
+
+		@Test
+		void fuelRiskCacheMiss_returnsEmpty(@TempDir Path tempDir) {
+			IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+			assertThat(svc.getCachedFuelRiskLayer()).isEmpty();
+		}
+
+		@Test
+		void storeAndRetrieveFuelRisk(@TempDir Path tempDir) throws IOException {
+			IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+			svc.storeFuelRiskLayer(new byte[]{1, 2, 3});
+			assertThat(svc.getCachedFuelRiskLayer()).isPresent();
+		}
+
+		@Test
+		void fuelRiskCacheDoesNotConflictWithEsa(@TempDir Path tempDir) throws IOException {
+			IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+			svc.storeFuelRiskLayer(new byte[]{1});
+			// ESA cache should still be empty
+			assertThat(svc.getCachedEsaLayer()).isEmpty();
 		}
 	}
 

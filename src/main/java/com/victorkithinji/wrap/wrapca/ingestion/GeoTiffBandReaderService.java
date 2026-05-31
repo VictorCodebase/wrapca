@@ -159,6 +159,72 @@ public class GeoTiffBandReaderService {
 		}
 	}
 
+	/**
+	 * Reads the CV fuel risk map GeoTIFF and returns native-resolution risk codes.
+	 * <p>
+	 * Single-band byte raster. Values: 1 (low), 2 (medium), 3 (high), 0 (NoData).
+	 * Bounding box is returned in EPSG:4326 degrees — RasterResamplerService
+	 * handles alignment to the CA grid extent during resampling.
+	 * <p>
+	 * If the file is missing the facade passes a zero-filled array instead —
+	 * this method must only be called when the file is confirmed to exist.
+	 *
+	 * @param fuelRiskPath path to the fuel risk GeoTIFF
+	 * @return FuelRiskBands at native resolution
+	 * @throws IOException if the file cannot be read
+	 */
+	public FuelRiskBands readFuelRisk(Path fuelRiskPath) throws IOException {
+		File file = fuelRiskPath.toFile();
+		if (!file.exists()) {
+			throw new IOException("Fuel risk GeoTIFF not found: " + fuelRiskPath);
+		}
+
+		GeoTiffFormat format = new GeoTiffFormat();
+		GridCoverage2DReader reader = format.getReader(file);
+		if (reader == null) {
+			throw new IOException("File is not a valid GeoTIFF: " + fuelRiskPath);
+		}
+
+		GridCoverage2D coverage = null;
+		try {
+			coverage = reader.read(null);
+
+			int actualBands = coverage.getNumSampleDimensions();
+			if (actualBands < 1) {
+				throw new IllegalArgumentException(
+					"Fuel risk GeoTIFF at " + fuelRiskPath + " has no bands.");
+			}
+			if (actualBands != 1) {
+				log.warn("Fuel risk GeoTIFF has {} bands, expected 1. " +
+					"Only band 0 will be read.", actualBands);
+			}
+
+			Raster raster = coverage.getRenderedImage().getData();
+			int cols = raster.getWidth();
+			int rows = raster.getHeight();
+
+			log.info("Reading fuel risk GeoTIFF: {}x{} cells from {}", rows, cols, fuelRiskPath);
+
+			byte[][] riskCodes = extractByteBand(raster, rows, cols);
+
+			// Fuel risk map is returned in its native EPSG:4326 envelope.
+			// RasterResamplerService aligns it to the CV grid extent.
+			ReferencedEnvelope envelope =
+				ReferencedEnvelope.reference(coverage.getEnvelope2D());
+			double pixelWidth = envelope.getWidth() / cols;
+
+			return new FuelRiskBands(
+				riskCodes, rows, cols, pixelWidth,
+				envelope.getMinX(), envelope.getMinY(),
+				envelope.getMaxX(), envelope.getMaxY()
+			);
+
+		} finally {
+			if (coverage != null) coverage.dispose(true);
+			reader.dispose();
+		}
+	}
+
 	// ─── CRS reprojection ─────────────────────────────────────────────────────
 
 	/**
@@ -227,6 +293,20 @@ public class GeoTiffBandReaderService {
 		}
 		return result;
 	}
+
+	private byte[][] extractByteBand(Raster raster, int rows, int cols) {
+		byte[][] result = new byte[rows][cols];
+		int[] pixel = new int[raster.getNumBands()];
+		for (int row = 0; row < rows; row++) {
+			for (int col = 0; col < cols; col++) {
+				raster.getPixel(raster.getMinX() + col, raster.getMinY() + row, pixel);
+				// Clamp to byte range — raster stores unsigned values as int
+				result[row][col] = (byte) (pixel[0] & 0xFF);
+			}
+		}
+		return result;
+	}
+
 
 	// ─── Validation ───────────────────────────────────────────────────────────
 

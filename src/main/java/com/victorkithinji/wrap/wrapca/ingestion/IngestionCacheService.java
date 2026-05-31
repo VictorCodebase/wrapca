@@ -10,9 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 /**
  * Checks the local cache directory for a GeoTIFF file matching today's date
@@ -34,6 +32,7 @@ public class IngestionCacheService {
 	// that do not change between runs and have no expiry date.
 	private static final String ESA_CACHE_FILENAME = "esa_worldcover.tif";
 	private static final String ROAD_CACHE_FILENAME = "osm_roads.geojson";
+	private static final String FUEL_RISK_CACHE_FILENAME = "fuel_risk_map.tif";
 
 	private final Path cacheDirectory;
 
@@ -160,6 +159,38 @@ public class IngestionCacheService {
 		return target;
 	}
 
+	// ─── CV fuel risk map cache (existence-only, never expires) ─────────────────
+
+	/**
+	 * Returns the cached fuel risk GeoTIFF if it exists, otherwise empty.
+	 * The fuel risk file is a static product — once cached it is never re-fetched.
+	 */
+	public Optional<Path> getCachedFuelRiskLayer() {
+		ensureCacheDirectoryExists();
+		Path candidate = cacheDirectory.resolve(FUEL_RISK_CACHE_FILENAME);
+		if (Files.exists(candidate)) {
+			log.info("Fuel risk cache hit: {}", candidate);
+			return Optional.of(candidate);
+		}
+		log.info("Fuel risk cache miss: no file at {}", candidate);
+		return Optional.empty();
+	}
+
+	/**
+	 * Stores the fuel risk GeoTIFF bytes to the cache and returns the written path.
+	 *
+	 * @param data raw GeoTIFF bytes
+	 * @return path of the written cache file
+	 * @throws IOException if the write fails
+	 */
+	public Path storeFuelRiskLayer(byte[] data) throws IOException {
+		ensureCacheDirectoryExists();
+		Path target = cacheDirectory.resolve(FUEL_RISK_CACHE_FILENAME);
+		Files.write(target, data);
+		log.info("Stored fuel risk GeoTIFF: {} bytes → {}", data.length, target);
+		return target;
+	}
+
 	private String buildFilename(LocalDate date) {
 		return CACHE_FILENAME_PREFIX + date.format(DATE_FORMAT) + CACHE_FILENAME_SUFFIX;
 	}
@@ -171,51 +202,4 @@ public class IngestionCacheService {
 			throw new IllegalStateException("Cannot create cache directory: " + cacheDirectory, e);
 		}
 	}
-
-
-// NOTE: the imports above are already present in IngestionCacheService.
-// Only the method body below needs to be added — do not duplicate imports
-// or the class/field declarations.
-
-	/**
-	 * Returns the most recently dated cv_fuel_state_*.tif in the cache directory,
-	 * regardless of whether it matches today's date.
-	 * <p>
-	 * Used by CvApiClient as a fallback when:
-	 * - CV is unreachable (network failure, CV module not running)
-	 * - stub-mode=true and no today's cache file exists yet
-	 * - The server restarts on a day when no fresh download has occurred
-	 * <p>
-	 * File selection: sorts by filename descending (YYYY-MM-DD lexicographic order
-	 * is identical to chronological order) and returns the first match.
-	 * <p>
-	 * Returns Optional.empty() when the cache directory does not exist or
-	 * contains no matching files. Never throws.
-	 */
-	public Optional<Path> getLatestCachedFuelState() {
-		Path cacheDir = cacheDirectory; // use whatever field/method the class already uses
-		if (!Files.isDirectory(cacheDir)) {
-			log.warn("IngestionCacheService: cache directory does not exist — {}",
-				cacheDir.toAbsolutePath());
-			return Optional.empty();
-		}
-
-		try (Stream<Path> files = Files.list(cacheDir)) {
-			return files
-				.filter(p -> {
-					String name = p.getFileName().toString();
-					return name.startsWith("cv_fuel_state_") && name.endsWith(".tif");
-				})
-				.max(Comparator.comparing(p -> p.getFileName().toString()))
-				.map(p -> {
-					log.debug("IngestionCacheService: latest cached fuel state — {}", p);
-					return p;
-				});
-		} catch (IOException e) {
-			log.warn("IngestionCacheService: failed to list cache directory ({}) — {}",
-				cacheDir, e.getMessage());
-			return Optional.empty();
-		}
-	}
-
 }

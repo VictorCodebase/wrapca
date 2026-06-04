@@ -67,4 +67,6 @@ public class SessionStatusResponseDto {
 	 * Populated from RunLogReaderService. Empty list when no runs exist.
 	 */
 	List<RunSummaryResponseDto> pastRuns;
+
+	byte[] fuelRiskValues;
 }

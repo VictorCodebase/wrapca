@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.Optional;
 
 /**
@@ -61,6 +62,35 @@ public class IngestionCacheService {
 		}
 		log.info("Cache miss for date {}: no file at {}", date, candidate);
 		return Optional.empty();
+	}
+
+	/**
+	 * Scans the cache directory for any previously stored fuel state file,
+	 * returning the most recently dated one regardless of today's date.
+	 * <p>
+	 * Used by CvApiClient as a fallback when the CV endpoint is unreachable
+	 * and no file exists for today. Filename sort is sufficient for date
+	 * ordering because YYYY-MM-DD is lexicographically identical to
+	 * chronological order.
+	 * <p>
+	 * Returns empty if the cache directory does not exist or contains no
+	 * matching files. Never throws.
+	 */
+	public Optional<Path> getLatestCachedFuelState() {
+		ensureCacheDirectoryExists();
+		try {
+			return Files.list(cacheDirectory)
+				.filter(p -> {
+					String name = p.getFileName().toString();
+					return name.startsWith(CACHE_FILENAME_PREFIX)
+						&& name.endsWith(CACHE_FILENAME_SUFFIX);
+				})
+				.max(Comparator.comparing(p -> p.getFileName().toString()));
+		} catch (IOException e) {
+			log.warn("Could not scan cache directory for latest fuel state: {}",
+				e.getMessage());
+			return Optional.empty();
+		}
 	}
 
 	/**

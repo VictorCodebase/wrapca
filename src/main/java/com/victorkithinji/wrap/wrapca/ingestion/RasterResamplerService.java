@@ -14,7 +14,7 @@ import java.util.Set;
  * target cell size (default 100 m, configurable via
  * {@code wrap.simulation.cell-size-metres}).
  *
- * <p>Two resampling paths:
+ * <p>Three resampling paths:
  * <ul>
  *   <li>{@link #resample(GridBands)} — continuous bands (NDVI, NDMI, elevation,
  *       slope, aspect). Uses block-averaging (mean). Nearest-neighbour is
@@ -22,6 +22,9 @@ import java.util.Set;
  *   <li>{@link #resampleEsa(EsaBands)} — categorical ESA class codes.
  *       Uses majority-class resampling. Tie-breaking rule: prefer combustible
  *       ESA class over non-combustible (conservative for fire risk).</li>
+ *   <li>{@link #resampleFuelRisk(FuelRiskBands)} — categorical fuel risk codes (1–3).
+ *       Uses majority-class resampling. Tie-breaking rule: prefer higher risk
+ *       category (conservative for fire risk).</li>
  * </ul>
  *
  * <p>Bounding box ({@code minX / minY / maxX / maxY}) is preserved unchanged
@@ -85,10 +88,10 @@ public class RasterResamplerService {
 
 		float[][] ndvi = new float[dstRows][dstCols];
 		float[][] ndmi = new float[dstRows][dstCols];
+		float[][] fmc = new float[dstRows][dstCols];
 		float[][] elevation = new float[dstRows][dstCols];
 		float[][] slope = new float[dstRows][dstCols];
 		float[][] aspect = new float[dstRows][dstCols];
-		float[][] fmc = new float[dstRows][dstCols];
 
 		for (int dr = 0; dr < dstRows; dr++) {
 			for (int dc = 0; dc < dstCols; dc++) {
@@ -99,6 +102,7 @@ public class RasterResamplerService {
 
 				ndvi[dr][dc] = blockMean(native_.getNdvi(), r0, c0, r1, c1);
 				ndmi[dr][dc] = blockMean(native_.getNdmi(), r0, c0, r1, c1);
+				fmc[dr][dc] = blockMean(native_.getFmc(), r0, c0, r1, c1);
 				elevation[dr][dc] = blockMean(native_.getElevationMetres(), r0, c0, r1, c1);
 				slope[dr][dc] = blockMean(native_.getSlopeDegrees(), r0, c0, r1, c1);
 				aspect[dr][dc] = blockMean(native_.getAspectRadians(), r0, c0, r1, c1);
@@ -170,6 +174,62 @@ public class RasterResamplerService {
 	}
 
 	// -------------------------------------------------------------------------
+	// Categorical fuel risk bands — majority-class resampling
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Resamples the CV fuel risk raster to CA grid resolution.
+	 *
+	 * <p>Method: majority class — the most frequent risk code within each target
+	 * cell's footprint is selected. Tie-breaking rule: prefer higher risk code
+	 * (conservative — when in doubt, report higher risk to the ranger).
+	 *
+	 * <p>Valid values: 1 (low), 2 (medium), 3 (high). 0 is NoData and is
+	 * excluded from majority selection; if a block contains only NoData pixels
+	 * the output cell is 0.
+	 *
+	 * @param native_ FuelRiskBands from GeoTiffBandReaderService at native pixel size.
+	 * @return byte[][] of fuel risk codes at CA grid resolution, sized [dstRows][dstCols].
+	 * Returns {@code native_.getRiskCodes()} unchanged if no resampling is needed.
+	 */
+	public byte[][] resampleFuelRisk(FuelRiskBands native_) {
+
+		double targetCellSize = simulationConfig.getCellSizeMetres();
+		double nativeCellSize = native_.getCellSizeMetres();
+
+		if (Double.compare(nativeCellSize, targetCellSize) == 0) {
+			log.info("FuelRiskBands: native cell size equals target ({}m) — skipping resample.", targetCellSize);
+			return native_.getRiskCodes();
+		}
+
+		double scaleFactor = targetCellSize / nativeCellSize;
+		guardAgainstUpsampling(scaleFactor, targetCellSize, nativeCellSize);
+
+		int srcRows = native_.getRows();
+		int srcCols = native_.getCols();
+		int dstRows = (int) Math.ceil(srcRows / scaleFactor);
+		int dstCols = (int) Math.ceil(srcCols / scaleFactor);
+
+		log.info("FuelRiskBands: resampling {}x{} at {}m → {}x{} at {}m (majority risk)",
+			srcRows, srcCols, nativeCellSize, dstRows, dstCols, targetCellSize);
+
+		byte[][] result = new byte[dstRows][dstCols];
+
+		for (int dr = 0; dr < dstRows; dr++) {
+			for (int dc = 0; dc < dstCols; dc++) {
+				int r0 = (int) Math.floor(dr * scaleFactor);
+				int c0 = (int) Math.floor(dc * scaleFactor);
+				int r1 = Math.min((int) Math.ceil((dr + 1) * scaleFactor), srcRows);
+				int c1 = Math.min((int) Math.ceil((dc + 1) * scaleFactor), srcCols);
+
+				result[dr][dc] = majorityRisk(native_.getRiskCodes(), r0, c0, r1, c1);
+			}
+		}
+
+		return result;
+	}
+
+	// -------------------------------------------------------------------------
 	// Private helpers
 	// -------------------------------------------------------------------------
 
@@ -220,6 +280,37 @@ public class RasterResamplerService {
 		}
 
 		return bestCode;
+	}
+
+	/**
+	 * Selects the majority fuel risk code within a block.
+	 *
+	 * <p>NoData (0) pixels are excluded from voting — they do not contribute
+	 * to any code's frequency count. If all pixels in the block are NoData,
+	 * returns 0.
+	 *
+	 * <p>Tie-breaking: higher risk code wins (conservative — prefer reporting
+	 * higher risk to the ranger over lower).
+	 */
+	private byte majorityRisk(byte[][] src, int r0, int c0, int r1, int c1) {
+		int freq1 = 0, freq2 = 0, freq3 = 0;
+
+		for (int r = r0; r < r1; r++)
+			for (int c = c0; c < c1; c++) {
+				switch (src[r][c]) {
+					case 1 -> freq1++;
+					case 2 -> freq2++;
+					case 3 -> freq3++;
+					// 0 = NoData — excluded from voting
+				}
+			}
+
+		if (freq3 == 0 && freq2 == 0 && freq1 == 0) return 0; // all NoData
+
+		// Prefer higher risk on tie
+		if (freq3 >= freq2 && freq3 >= freq1) return 3;
+		if (freq2 >= freq1) return 2;
+		return 1;
 	}
 
 	private void guardAgainstUpsampling(double scaleFactor, double target, double native_) {

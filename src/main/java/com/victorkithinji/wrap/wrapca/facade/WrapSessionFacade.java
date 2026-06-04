@@ -24,6 +24,7 @@ import com.victorkithinji.wrap.wrapca.history.RunLogWriterService;
 import com.victorkithinji.wrap.wrapca.history.RunRecord;
 
 import com.victorkithinji.wrap.wrapca.ingestion.EsaBands;
+import com.victorkithinji.wrap.wrapca.ingestion.FuelRiskBands;
 import com.victorkithinji.wrap.wrapca.ingestion.GeoTiffBandReaderService;
 import com.victorkithinji.wrap.wrapca.ingestion.GridBands;
 import com.victorkithinji.wrap.wrapca.ingestion.OsmRoadLoaderService;
@@ -87,6 +88,12 @@ public class WrapSessionFacade {
 	@Value("${wrap.data.esa-path}")
 	private String esaPath;
 
+	/**
+	 * Optional — system starts normally when absent; fuelRiskValues will be all zeros.
+	 */
+	@Value("${wrap.data.fuel-risk-path:}")
+	private String fuelRiskPath;
+
 	private final SimulationConfig simulationConfig;
 	private final CvApiClient cvApiClient;
 	private final GeoTiffBandReaderService geoTiffBandReaderService;
@@ -124,6 +131,9 @@ public class WrapSessionFacade {
 	// in a flat array — we hold flat arrays here for O(1) response assembly.
 	private volatile float[] cachedElevationMetres;
 	private volatile float[] cachedSlopeDegrees;
+	// Flat row-major fuel risk codes from CV, captured at grid init time.
+	// Values 1–3; 0 = NoData or file absent. Never null after first successful load.
+	private volatile byte[] cachedFuelRiskFlat;
 
 	public WrapSessionFacade(
 		SimulationConfig simulationConfig,
@@ -243,6 +253,11 @@ public class WrapSessionFacade {
 			System.currentTimeMillis() - t1,
 			resampledBands.getRows(), resampledBands.getCols());
 
+		// 5b. Load and resample fuel risk map (optional — startup continues if absent)
+		int dstRows = resampledBands.getRows();
+		int dstCols = resampledBands.getCols();
+		byte[][] fuelRiskCodes = loadAndResampleFuelRisk(dstRows, dstCols);
+
 		// 6. Capture bounding box from resampled bands before passing to grid builder
 		minX = resampledBands.getMinX();
 		minY = resampledBands.getMinY();
@@ -252,25 +267,27 @@ public class WrapSessionFacade {
 		// Capture elevation and slope as flat row-major arrays for GET /api/session/grid.
 		// Done here because CaGrid does not hold a flat elevation array, and
 		// resampledBands is discarded after gridInitialiserService.build().
-		int dstRows = resampledBands.getRows();
-		int dstCols = resampledBands.getCols();
 		float[][] elevGrid = resampledBands.getElevationMetres();
 		float[][] slopeGrid = resampledBands.getSlopeDegrees();
 		float[] elevFlat = new float[dstRows * dstCols];
 		float[] slopeFlat = new float[dstRows * dstCols];
+		byte[] riskFlat = new byte[dstRows * dstCols];
 		for (int r = 0; r < dstRows; r++) {
 			for (int c = 0; c < dstCols; c++) {
 				int idx = r * dstCols + c;
 				elevFlat[idx] = elevGrid[r][c];
-				slopeFlat[idx] = slopeGrid[r][c];   // already degrees from CV
+				slopeFlat[idx] = slopeGrid[r][c];
+				riskFlat[idx] = fuelRiskCodes[r][c];
 			}
 		}
 		cachedElevationMetres = elevFlat;
 		cachedSlopeDegrees = slopeFlat;
+		cachedFuelRiskFlat = riskFlat;
 
-		// 7. Build grid
+		// 7. Build grid — four-argument signature includes fuel risk codes
 		t1 = System.currentTimeMillis();
-		gridInitResult = gridInitialiserService.build(resampledBands, resampledEsa, roadLayer);
+		gridInitResult = gridInitialiserService.build(
+			resampledBands, resampledEsa, roadLayer, fuelRiskCodes);
 		baseGrid = gridInitResult.getGrid();
 		log.debug("loadGridFromSources: grid built in {}ms — {}x{} cells",
 			System.currentTimeMillis() - t1, baseGrid.rows, baseGrid.cols);
@@ -284,6 +301,69 @@ public class WrapSessionFacade {
 			baseGrid.rows, baseGrid.cols, baseGrid.rows * baseGrid.cols,
 			baseGrid.cellSizeMetres,
 			(int) minX, (int) maxX, (int) minY, (int) maxY);
+	}
+
+	/**
+	 * Loads the CV fuel risk GeoTIFF and resamples it to target grid dimensions.
+	 * Returns a zero-filled array of the correct size when:
+	 * - wrap.data.fuel-risk-path is not set
+	 * - the file does not exist
+	 * - any read error occurs
+	 * The system never fails to start due to a missing fuel risk file.
+	 */
+	private byte[][] loadAndResampleFuelRisk(int targetRows, int targetCols) {
+		byte[][] zeros = new byte[targetRows][targetCols];
+
+		if (fuelRiskPath == null || fuelRiskPath.isBlank()) {
+			log.debug("loadAndResampleFuelRisk: wrap.data.fuel-risk-path not set — " +
+				"fuelRiskValues will be all zeros");
+			return zeros;
+		}
+
+		Path path = Path.of(fuelRiskPath);
+		if (!java.nio.file.Files.exists(path)) {
+			log.warn("loadAndResampleFuelRisk: fuel risk file not found at {} — " +
+				"fuelRiskValues will be all zeros", path.toAbsolutePath());
+			return zeros;
+		}
+
+		try {
+			long t = System.currentTimeMillis();
+			FuelRiskBands nativeRisk = geoTiffBandReaderService.readFuelRisk(path);
+
+			// Guard: if cellSizeMetres looks like a degree value (< 1.0) the reader
+			// did not reproject the envelope. Substitute the known native pixel size
+			// in metres (~10m for this CV product) so the resampler produces the
+			// correct target dimensions instead of collapsing to 1×1.
+			if (nativeRisk.getCellSizeMetres() < 1.0) {
+				log.warn("loadAndResampleFuelRisk: cellSizeMetres={} looks like degrees, " +
+						"not metres — GeoTiffBandReaderService.readFuelRisk() needs " +
+						"envelope reprojection (Group 4 fix pending). " +
+						"Substituting 10.0m as native pixel size for resampling.",
+					nativeRisk.getCellSizeMetres());
+				nativeRisk = new FuelRiskBands(
+					nativeRisk.getRiskCodes(),
+					nativeRisk.getRows(),
+					nativeRisk.getCols(),
+					10.0,                         // corrected native pixel size metres
+					nativeRisk.getMinX(),
+					nativeRisk.getMinY(),
+					nativeRisk.getMaxX(),
+					nativeRisk.getMaxY());
+			}
+
+			byte[][] resampled = rasterResamplerService.resampleFuelRisk(nativeRisk);
+			log.debug("loadAndResampleFuelRisk: loaded and resampled in {}ms — " +
+					"native {}x{} → target {}x{}",
+				System.currentTimeMillis() - t,
+				nativeRisk.getRows(), nativeRisk.getCols(),
+				resampled.length, resampled[0].length);
+			return resampled;
+		} catch (Exception e) {
+			log.warn("loadAndResampleFuelRisk: failed to read fuel risk file ({}) — " +
+				"fuelRiskValues will be all zeros: {}", path, e.getMessage(), e);
+			return zeros;
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -322,7 +402,8 @@ public class WrapSessionFacade {
 			baseGrid.cols,
 			baseGrid.cellSizeMetres,
 			minX, minY, maxX, maxY,
-			pastRuns);
+			pastRuns,
+			cachedFuelRiskFlat);
 	}
 
 	// -------------------------------------------------------------------------
@@ -432,16 +513,11 @@ public class WrapSessionFacade {
 
 		RunAnalytics analytics = analyticsService.summarisePhaseTwo(
 			steps, activeFireGrid, simulationConfig);
-		log.debug("Phase 2 [{}]: analytics — burnedAreaHa={}, avgRosHa/h={}, " +
+		log.debug("Phase 2 [{}]: analytics — burnedAreaHa={}, peakRosHa/h={}, " +
 				"generations={}, perimeterCells={}",
 			runId,
 			analytics.getFinalBurnedAreaHectares(),
-			analytics.getBurnedAreaByVegetationType(),
 			analytics.getPeakRosHectaresPerHour(),
-			analytics.getStepAtPeakRos(),
-			analytics.getPerimeterLengthMetres(),
-			analytics.getSimulatedDurationHours(),
-			analytics.getNaturalBarrierCellsEncountered(),
 			analytics.getGenerationsRun(),
 			analytics.getPerimeterCellCountFinal());
 

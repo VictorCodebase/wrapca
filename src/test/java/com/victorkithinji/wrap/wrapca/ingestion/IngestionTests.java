@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.*;
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.*;
  * Unit tests for all Group 4 ingestion services.
  * Each test is self-contained and uses TempDir — no shared state.
  */
-class IngestionTest {
+class IngestionTests {
 
 	// ─── IngestionCacheService ───────────────────────────────────────────────
 
@@ -61,6 +62,33 @@ class IngestionTest {
 			svc.storeFuelStateForDate("day1".getBytes(), LocalDate.of(2026, 3, 9));
 
 			assertThat(svc.getCachedFuelStateForDate(LocalDate.of(2026, 3, 10))).isEmpty();
+		}
+
+		@Test
+		void getLatestCachedFuelState_returnsEmpty_whenNoneExist(@TempDir Path tempDir) {
+			IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+			assertThat(svc.getLatestCachedFuelState()).isEmpty();
+		}
+
+		@Test
+		void getLatestCachedFuelState_returnsMostRecent(@TempDir Path tempDir) throws IOException {
+			IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+			svc.storeFuelStateForDate("old".getBytes(), LocalDate.of(2026, 3, 1));
+			svc.storeFuelStateForDate("new".getBytes(), LocalDate.of(2026, 3, 9));
+
+			Optional<Path> latest = svc.getLatestCachedFuelState();
+			assertThat(latest).isPresent();
+			assertThat(latest.get().getFileName().toString())
+				.contains("2026-03-09");
+		}
+
+		@Test
+		void getLatestCachedFuelState_ignoresNonMatchingFiles(@TempDir Path tempDir) throws IOException {
+			IngestionCacheService svc = new IngestionCacheService(tempDir.toString());
+			// Store an ESA file — should not be picked up by the fuel state scanner
+			svc.storeEsaLayer("esa".getBytes());
+
+			assertThat(svc.getLatestCachedFuelState()).isEmpty();
 		}
 	}
 

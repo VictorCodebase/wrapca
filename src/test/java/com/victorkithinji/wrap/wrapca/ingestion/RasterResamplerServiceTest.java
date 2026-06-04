@@ -53,15 +53,16 @@ class RasterResamplerServiceTest {
 	}
 
 	@Test
-	void continuousBands_allFiveBandsResampled() {
+	void continuousBands_allSixBandsResampled() {
 		GridBands native_ = new GridBands(
-			filled(2, 2, 0.7f), filled(2, 2, 0.3f), filled(2, 2, 1500f),
-			filled(2, 2, 15.0f), filled(2, 2, 1.57f),
-			2, 2, 10, 0, 0, 20, 20, 40);
+			filled(2, 2, 0.7f), filled(2, 2, 0.3f), filled(2, 2, 0.08f),
+			filled(2, 2, 1500f), filled(2, 2, 15.0f), filled(2, 2, 1.57f),
+			2, 2, 10.0, 0, 0, 20, 20);
 		GridBands result = serviceWithTarget(20.0).resample(native_);
 
 		assertThat(result.getNdvi()[0][0]).isEqualTo(0.7f, within(1e-5f));
 		assertThat(result.getNdmi()[0][0]).isEqualTo(0.3f, within(1e-5f));
+		assertThat(result.getFmc()[0][0]).isEqualTo(0.08f, within(1e-5f));
 		assertThat(result.getElevationMetres()[0][0]).isEqualTo(1500f, within(0.1f));
 		assertThat(result.getSlopeDegrees()[0][0]).isEqualTo(15.0f, within(1e-4f));
 		assertThat(result.getAspectRadians()[0][0]).isEqualTo(1.57f, within(1e-4f));
@@ -70,8 +71,8 @@ class RasterResamplerServiceTest {
 	@Test
 	void continuousBands_boundingBoxPreserved() {
 		GridBands native_ = new GridBands(
-			filled(100, 100, 0.5f), filled(100, 100, 0.2f), filled(100, 100, 1000f),
-			filled(100, 100, 5f), filled(100, 100, 0.5f),
+			filled(100, 100, 0.5f), filled(100, 100, 0.2f), filled(100, 100, 0.08f),
+			filled(100, 100, 1000f), filled(100, 100, 5f), filled(100, 100, 0.5f),
 			100, 100, 10.0, 500000, 9800000, 501000, 9801000);
 		GridBands result = service.resample(native_);
 
@@ -164,6 +165,93 @@ class RasterResamplerServiceTest {
 	}
 
 	// =========================================================================
+	// resampleFuelRisk(FuelRiskBands) — majority-class, higher-risk tie-break
+	// =========================================================================
+
+	@Test
+	void fuelRisk_outputDimensionsCorrect() {
+		FuelRiskBands native_ = uniformFuelRisk(200, 200, 10.0, (byte) 2);
+		byte[][] result = service.resampleFuelRisk(native_);
+		assertThat(result.length).isEqualTo(20);
+		assertThat(result[0].length).isEqualTo(20);
+	}
+
+	@Test
+	void fuelRisk_uniformSourcePreservesCode() {
+		FuelRiskBands native_ = uniformFuelRisk(100, 100, 10.0, (byte) 3);
+		byte[][] result = service.resampleFuelRisk(native_);
+		for (int r = 0; r < result.length; r++)
+			for (int c = 0; c < result[r].length; c++)
+				assertThat(result[r][c]).as("[%d][%d]", r, c).isEqualTo((byte) 3);
+	}
+
+	@Test
+	void fuelRisk_majorityCodeSelected() {
+		// 3 pixels of risk=1, 1 pixel of risk=3 → majority is 1
+		byte[][] codes = {
+			{1, 1},
+			{1, 3}
+		};
+		byte[][] result = serviceWithTarget(20.0).resampleFuelRisk(
+			fuelRiskWithCodes(2, 2, 10.0, codes));
+		assertThat(result[0][0]).isEqualTo((byte) 1);
+	}
+
+	@Test
+	void fuelRisk_tieBreakerPrefersHigherRisk() {
+		// 2 pixels of risk=1, 2 pixels of risk=3 → tie → higher risk (3) wins
+		byte[][] codes = {
+			{1, 1},
+			{3, 3}
+		};
+		byte[][] result = serviceWithTarget(20.0).resampleFuelRisk(
+			fuelRiskWithCodes(2, 2, 10.0, codes));
+		assertThat(result[0][0]).isEqualTo((byte) 3);
+	}
+
+	@Test
+	void fuelRisk_noDataExcludedFromVoting() {
+		// 2 pixels of NoData (0), 2 pixels of risk=2 → NoData excluded → result is 2
+		byte[][] codes = {
+			{0, 0},
+			{2, 2}
+		};
+		byte[][] result = serviceWithTarget(20.0).resampleFuelRisk(
+			fuelRiskWithCodes(2, 2, 10.0, codes));
+		assertThat(result[0][0]).isEqualTo((byte) 2);
+	}
+
+	@Test
+	void fuelRisk_allNoDataBlockReturnsZero() {
+		byte[][] codes = {
+			{0, 0},
+			{0, 0}
+		};
+		byte[][] result = serviceWithTarget(20.0).resampleFuelRisk(
+			fuelRiskWithCodes(2, 2, 10.0, codes));
+		assertThat(result[0][0]).isEqualTo((byte) 0);
+	}
+
+	@Test
+	void fuelRisk_noOpWhenCellSizeMatches() {
+		FuelRiskBands native_ = uniformFuelRisk(20, 20, 100.0, (byte) 2);
+		assertThat(service.resampleFuelRisk(native_)).isSameAs(native_.getRiskCodes());
+	}
+
+	@Test
+	void fuelRisk_upsamplingThrows() {
+		FuelRiskBands native_ = uniformFuelRisk(100, 100, 10.0, (byte) 1);
+		assertThatThrownBy(() -> serviceWithTarget(5.0).resampleFuelRisk(native_))
+			.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void fuelRisk_partialEdgeBlockDoesNotThrow() {
+		assertThatCode(() -> service.resampleFuelRisk(uniformFuelRisk(15, 15, 10.0, (byte) 2)))
+			.doesNotThrowAnyException();
+	}
+
+	// =========================================================================
 	// Builders
 	// =========================================================================
 
@@ -176,13 +264,13 @@ class RasterResamplerServiceTest {
 	private GridBands uniformGridBands(int rows, int cols, double cellSize, float value) {
 		return new GridBands(
 			filled(rows, cols, value), filled(rows, cols, value), filled(rows, cols, value),
-			filled(rows, cols, value), filled(rows, cols, value),
+			filled(rows, cols, value), filled(rows, cols, value), filled(rows, cols, value),
 			rows, cols, cellSize, 0, 0, cols * cellSize, rows * cellSize);
 	}
 
 	private GridBands gridBandsWithNdvi(int rows, int cols, double cellSize, float[][] ndvi) {
 		return new GridBands(ndvi,
-			filled(rows, cols, 0.2f), filled(rows, cols, 1000f),
+			filled(rows, cols, 0.2f), filled(rows, cols, 0.08f), filled(rows, cols, 1000f),
 			filled(rows, cols, 5f), filled(rows, cols, 0.5f),
 			rows, cols, cellSize, 0, 0, cols * cellSize, rows * cellSize);
 	}
@@ -205,6 +293,18 @@ class RasterResamplerServiceTest {
 			for (int c = 0; c < cols; c++)
 				arr[r][c] = value;
 		return arr;
+	}
+
+	private FuelRiskBands uniformFuelRisk(int rows, int cols, double cellSize, byte value) {
+		byte[][] codes = new byte[rows][cols];
+		for (int r = 0; r < rows; r++)
+			for (int c = 0; c < cols; c++)
+				codes[r][c] = value;
+		return new FuelRiskBands(codes, rows, cols, cellSize, 0, 0, cols * cellSize, rows * cellSize);
+	}
+
+	private FuelRiskBands fuelRiskWithCodes(int rows, int cols, double cellSize, byte[][] codes) {
+		return new FuelRiskBands(codes, rows, cols, cellSize, 0, 0, cols * cellSize, rows * cellSize);
 	}
 
 	private static org.assertj.core.data.Offset<Float> within(float d) {

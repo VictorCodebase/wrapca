@@ -37,7 +37,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collections;
@@ -266,7 +265,7 @@ class WrapSessionFacadeTest {
 	// -------------------------------------------------------------------------
 
 	@Test
-	void runPhaseTwo_manualIgnition_seedsCellsFromGeoJson() throws IOException {
+	void runPhaseTwo_manualIgnition_seedsCellsFromGeoJson() {
 		triggerSuccessfulRefresh();
 		stubPhaseTwoPipeline();
 
@@ -288,7 +287,7 @@ class WrapSessionFacadeTest {
 	}
 
 	@Test
-	void runPhaseTwo_cvNotDisabled_fetchesCvPerimeter() throws IOException {
+	void runPhaseTwo_cvNotDisabled_fetchesCvPerimeter() {
 		triggerSuccessfulRefresh();
 		stubPhaseTwoPipeline();
 
@@ -409,7 +408,7 @@ class WrapSessionFacadeTest {
 	@Test
 	void getAllRuns_delegatesToReader() {
 		RunRecord r = new RunRecord("id", SimulationModeEnum.PRE_FIRE,
-			Instant.now(), Instant.now(), Map.of(), null, null);
+			Instant.now(), Instant.now(), Map.of(), null);
 		when(runLogReaderService.readAll()).thenReturn(List.of(r));
 
 		assertThat(facade.getAllRuns()).hasSize(1);
@@ -433,10 +432,18 @@ class WrapSessionFacadeTest {
 		EsaBands nativeEsa = buildNativeEsa();
 		when(geoTiffBandReaderService.read(any())).thenReturn(nativeBands);
 		when(geoTiffBandReaderService.readEsa(any())).thenReturn(nativeEsa);
+		// readFuelRisk — only called when fuelRiskPath is set; stubbed defensively
+		FuelRiskBands nativeRisk = new FuelRiskBands(
+			new byte[][]{{1, 2}, {2, 3}}, 2, 2, 10.0,
+			300000.0, 9800000.0, 300200.0, 9900000.0);
+		when(geoTiffBandReaderService.readFuelRisk(any())).thenReturn(nativeRisk);
 		when(osmRoadLoaderService.load()).thenReturn(new RoadLayer(Collections.emptyList()));
 		when(rasterResamplerService.resample(any())).thenReturn(resampledBands);
 		when(rasterResamplerService.resampleEsa(any())).thenReturn(new int[][]{{10, 30}, {30, 30}});
-		when(gridInitialiserService.build(any(), any(), any())).thenReturn(gridInitResult);
+		when(rasterResamplerService.resampleFuelRisk(any()))
+			.thenReturn(new byte[][]{{1, 2}, {2, 3}});
+		// 4-argument build signature (added with fuel risk support)
+		when(gridInitialiserService.build(any(), any(), any(), any())).thenReturn(gridInitResult);
 		when(windFieldLoaderService.load(anyInt(), anyInt())).thenReturn(windField);
 	}
 

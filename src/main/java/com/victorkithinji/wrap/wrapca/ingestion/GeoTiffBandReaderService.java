@@ -60,6 +60,7 @@ public class GeoTiffBandReaderService {
 			throw new IOException("GeoTIFF not found: " + tiffPath);
 		}
 
+		System.out.println("Opening geotiff file: " + tiffPath);
 		GeoTiffFormat format = new GeoTiffFormat();
 		GridCoverage2DReader reader = format.getReader(file);
 		if (reader == null) {

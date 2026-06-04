@@ -208,16 +208,19 @@ public class GeoTiffBandReaderService {
 
 			byte[][] riskCodes = extractByteBand(raster, rows, cols);
 
-			// Fuel risk map is returned in its native EPSG:4326 envelope.
+			// Reproject the envelope to the target CRS (UTM 37S in meters)
 			// RasterResamplerService aligns it to the CV grid extent.
-			ReferencedEnvelope envelope =
-				ReferencedEnvelope.reference(coverage.getEnvelope2D());
-			double pixelWidth = envelope.getWidth() / cols;
+//			ReferencedEnvelope envelope =
+//				ReferencedEnvelope.reference(coverage.getEnvelope2D());
+//			double pixelWidth = envelope.getWidth() / cols;
+
+			ReferencedEnvelope utmEnvelope = toUtmEnvelope(coverage);
+			double pixelWidth = utmEnvelope.getWidth() / cols;
 
 			return new FuelRiskBands(
 				riskCodes, rows, cols, pixelWidth,
-				envelope.getMinX(), envelope.getMinY(),
-				envelope.getMaxX(), envelope.getMaxY()
+				utmEnvelope.getMinX(), utmEnvelope.getMinY(),
+				utmEnvelope.getMaxX(), utmEnvelope.getMaxY()
 			);
 
 		} finally {

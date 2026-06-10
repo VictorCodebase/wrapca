@@ -1,0 +1,53 @@
+{
+  "fuelModels": {
+    "AFROMONTANE_FOREST": {
+      "description": "Dense Afromontane forest — high canopy, moist understorey",
+      "ovendryFuelLoad_kg_m2": 1.20,
+      "moistureOfExtinction_fraction": 0.25,
+      "heatContent_kJ_kg": 18622,
+      "savRatio_m2_m3": 4921
+    },
+    "GRASSLAND": {
+      "description": "Open grassland and savannah — fine, fast-drying grass fuels",
+      "ovendryFuelLoad_kg_m2": 0.45,
+      "moistureOfExtinction_fraction": 0.15,
+      "heatContent_kJ_kg": 18622,
+      "savRatio_m2_m3": 11483
+    },
+    "SHRUBLAND": {
+      "description": "Mixed shrub layer with grass understorey",
+      "ovendryFuelLoad_kg_m2": 0.75,
+      "moistureOfExtinction_fraction": 0.20,
+      "heatContent_kJ_kg": 18622,
+      "savRatio_m2_m3": 6562
+    },
+    "BARE_SOIL": {
+      "description": "Bare soil — minimal combustible material",
+      "ovendryFuelLoad_kg_m2": 0.02,
+      "moistureOfExtinction_fraction": 0.12,
+      "heatContent_kJ_kg": 18622,
+      "savRatio_m2_m3": 3281
+    },
+    "CROPLAND": {
+      "description": "Cultivated agricultural land — crop residue, grassland-equivalent fuel parameters",
+      "ovendryFuelLoad_kg_m2": 0.45,
+      "moistureOfExtinction_fraction": 0.15,
+      "heatContent_kJ_kg": 18622,
+      "savRatio_m2_m3": 11483
+    },
+    "WATER": {
+      "description": "Water body — non-combustible, sentinel value",
+      "ovendryFuelLoad_kg_m2": 0.0,
+      "moistureOfExtinction_fraction": 1.0,
+      "heatContent_kJ_kg": 0,
+      "savRatio_m2_m3": 0
+    },
+    "BUILT": {
+      "description": "Built / impervious surface — non-combustible, sentinel value",
+      "ovendryFuelLoad_kg_m2": 0.0,
+      "moistureOfExtinction_fraction": 1.0,
+      "heatContent_kJ_kg": 0,
+      "savRatio_m2_m3": 0
+    }
+  }
+}

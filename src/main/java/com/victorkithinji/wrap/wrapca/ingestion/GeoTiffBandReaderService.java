@@ -61,8 +61,13 @@ public class GeoTiffBandReaderService {
 		}
 
 		System.out.println("Opening geotiff file: " + tiffPath);
+
+		org.geotools.util.factory.Hints hints = new org.geotools.util.factory.Hints(
+			org.geotools.util.factory.Hints.FORCE_LONGITUDE_FIRST_AXIS_ORDER,
+			Boolean.TRUE
+		);
 		GeoTiffFormat format = new GeoTiffFormat();
-		GridCoverage2DReader reader = format.getReader(file);
+		GridCoverage2DReader reader = format.getReader(file, hints);
 		if (reader == null) {
 			throw new IOException("File is not a valid GeoTIFF: " + tiffPath);
 		}
@@ -71,6 +76,18 @@ public class GeoTiffBandReaderService {
 		try {
 			coverage = reader.read(null);
 			validateBandCount(coverage, tiffPath);
+
+			// Debug logs:
+			log.info("GeoTIFF image: {}", tiffPath);
+			CoordinateReferenceSystem nativeCrs = coverage.getCoordinateReferenceSystem2D();
+			ReferencedEnvelope nativeEnv = coverage.getEnvelope2D();
+			log.info("GeoTIFF native CRS: {}", nativeCrs.getName().getCode());
+			log.info("GeoTIFF native envelope: {}", nativeEnv);
+
+			// Now call your existing method and log its result
+			ReferencedEnvelope utmEnv = toUtmEnvelope(coverage);
+			log.info("toUtmEnvelope result: {}", utmEnv);
+			log.info("toUtmEnvelope CRS: {}", utmEnv.getCoordinateReferenceSystem().getName().getCode());
 
 			Raster raster = coverage.getRenderedImage().getData();
 			int cols = raster.getWidth();
@@ -122,9 +139,13 @@ public class GeoTiffBandReaderService {
 		if (!file.exists()) {
 			throw new IOException("ESA WorldCover GeoTIFF not found: " + esaTiffPath);
 		}
+		org.geotools.util.factory.Hints hints = new org.geotools.util.factory.Hints(
+			org.geotools.util.factory.Hints.FORCE_LONGITUDE_FIRST_AXIS_ORDER,
+			Boolean.TRUE
+		);
 
 		GeoTiffFormat format = new GeoTiffFormat();
-		GridCoverage2DReader reader = format.getReader(file);
+		GridCoverage2DReader reader = format.getReader(file, hints);
 		if (reader == null) {
 			throw new IOException("File is not a valid GeoTIFF: " + esaTiffPath);
 		}
@@ -180,8 +201,12 @@ public class GeoTiffBandReaderService {
 			throw new IOException("Fuel risk GeoTIFF not found: " + fuelRiskPath);
 		}
 
+		org.geotools.util.factory.Hints hints = new org.geotools.util.factory.Hints(
+			org.geotools.util.factory.Hints.FORCE_LONGITUDE_FIRST_AXIS_ORDER,
+			Boolean.TRUE
+		);
 		GeoTiffFormat format = new GeoTiffFormat();
-		GridCoverage2DReader reader = format.getReader(file);
+		GridCoverage2DReader reader = format.getReader(file, hints);
 		if (reader == null) {
 			throw new IOException("File is not a valid GeoTIFF: " + fuelRiskPath);
 		}
@@ -247,6 +272,7 @@ public class GeoTiffBandReaderService {
 
 			ReferencedEnvelope sourceEnvelope =
 				ReferencedEnvelope.reference(coverage.getEnvelope2D());
+
 
 			if (CRS.equalsIgnoreMetadata(sourceCrs, targetCrs)) {
 				log.debug("Coverage CRS is already {}. No reprojection needed.",

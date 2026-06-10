@@ -83,7 +83,7 @@ public class RunLogReaderService {
 		try {
 			return mapper.readValue(file.toFile(), RunRecord.class);
 		} catch (IOException e) {
-			log.warn("Skipping unreadable run record {}: {}", file.getFileName(), e.getMessage());
+			//log.warn("Skipping unreadable run record {}: {}", file.getFileName(), e.getMessage());
 			return null;
 		}
 	}

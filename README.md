@@ -1,8 +1,5 @@
-### WRaP CA Engine — Implementation Order & Handoff Reference
+### WRaP CA Engine
 
-This document is self-contained for use in a new chat. The proposal PDF will also be available.
-
----
 
 ### Project Identity
 

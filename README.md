@@ -30,7 +30,7 @@ evaluated per generation — this is the core efficiency constraint.
 
 ---
 
-### Architecture layers (do not collapse these)
+### Architecture layers 
 
 ```
 api/            → HTTP only, no logic
@@ -51,7 +51,7 @@ cvintegration/  → HTTP client to CV module, mode detection boundary
 
 ---
 
-### application.properties (already in project)
+### application.properties 
 
 ```properties
 spring.application.name=WrapCa
@@ -68,20 +68,6 @@ wrap.cv.stub-mode=true
 wrap.data.esa-path=./data/esa/esa_worldcover.tif
 wrap.data.roads-path=./data/osm/roads.geojson
 ```
-
----
-
-### pom.xml dependencies already confirmed working
-
-- spring-boot-starter-web
-- spring-boot-starter-validation
-- spring-boot-starter-devtools
-- spring-boot-starter-test
-- lombok (with annotation processor path configured)
-- gt-coverage, gt-geotiff, gt-referencing, gt-epsg-hsql (GeoTools 31.0, OSGeo repo)
-- jackson-databind, jackson-datatype-jsr310
-- commons-math3 3.6.1
-- compiler plugin with `<release>21</release>`
 
 ---
 

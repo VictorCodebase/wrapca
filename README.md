@@ -11,7 +11,8 @@ Base package: com.victorkithinji.wrap.wrapca
 Project name: WrapCa
 ```
 
-See documentation: [Documentation](Wildfire Risk and Progression Modelling Documentation.pdf)
+See documentation: [Documentation](Wildfire%20Risk%20and%20Progression%20Modelling%20Documentation.pdf)
+
 
 
 ---

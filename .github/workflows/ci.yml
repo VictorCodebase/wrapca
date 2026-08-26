@@ -1,115 +1,128 @@
 name: WrapCa CI
 
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    push:
+        branches: [ master ]
+    pull_request:
+        branches: [ master ]
 
 jobs:
 
-  stage-1-foundation:
-    name: "Stage 1 — Domain & Physics (grid, rothermel)"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Compile
-        run: mvn -B compile
-      - name: Unit test — grid + rothermel
-        run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.grid.**,com.victorkithinji.wrap.wrapca.rothermel.**"
+    stage-1-foundation:
+        name: "Stage 1 — Domain & Physics (grid, rothermel)"
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '21'
+                  cache: maven
+            - name: Compile
+              run: mvn -B compile
+            - name: Unit test — grid + rothermel
+              run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.grid.**,com.victorkithinji.wrap.wrapca.rothermel.**"
 
-  stage-2-config:
-    name: "Stage 2 — Configuration"
-    needs: stage-1-foundation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Spring context binding test — config
-        run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.config.**"
+    stage-2-config:
+        name: "Stage 2 — Configuration"
+        needs: stage-1-foundation
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '21'
+                  cache: maven
+            - name: Compile
+              run: mvn -B compile
+            # No tests exist yet for `config` — tracked gap, not a failure.
+            # This stage still runs so it's positioned in the pipeline correctly
+            # once tests are added; today it just compiles and flags the gap.
+            - name: Flag coverage gap — config
+              run: echo "::warning title=No tests::config package has zero test coverage (SimulationConfig, CorsConfig)"
 
-  stage-3-ingestion:
-    name: "Stage 3 — Ingestion & CV Integration"
-    needs: stage-2-config
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Unit test — ingestion + cvintegration
-        run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.ingestion.**,com.victorkithinji.wrap.wrapca.cvintegration.**"
+    stage-3-ingestion:
+        name: "Stage 3 — Ingestion & CV Integration"
+        needs: stage-2-config
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '21'
+                  cache: maven
+            - name: Unit test — ingestion
+              run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.ingestion.**"
+            - name: Flag coverage gap — cvintegration
+              run: echo "::warning title=No tests::cvintegration package has zero test coverage (FirePerimeterData, CvApiClient)"
 
-  stage-4-grid-simulation:
-    name: "Stage 4 — Grid Init & CA Engine"
-    needs: stage-3-ingestion
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Unit test — grid init + simulation engine
-        run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.simulation.**"
+    stage-4-grid-simulation:
+        name: "Stage 4 — Grid Init & CA Engine"
+        needs: stage-3-ingestion
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '21'
+                  cache: maven
+            - name: Unit test — simulation engine
+              run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.simulation.**"
 
-  stage-5-analysis:
-    name: "Stage 5 — Monte Carlo & CV Correction"
-    needs: stage-4-grid-simulation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Unit test — montecarlo + correction
-        run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.montecarlo.**,com.victorkithinji.wrap.wrapca.correction.**"
+    stage-5-analysis:
+        name: "Stage 5 — Monte Carlo & CV Correction"
+        needs: stage-4-grid-simulation
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '21'
+                  cache: maven
+            - name: Unit test — montecarlo
+              run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.montecarlo.**"
+            - name: Flag coverage gap — correction
+              run: echo "::warning title=No tests::correction package has zero test coverage (SuppressedZoneRegistry, CvStateInjectorService)"
 
-  stage-6-output-persistence:
-    name: "Stage 6 — Output, History, DTOs"
-    needs: stage-5-analysis
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Unit test — output + history + dto
-        run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.output.**,com.victorkithinji.wrap.wrapca.history.**,com.victorkithinji.wrap.wrapca.dto.**"
+    stage-6-output-persistence:
+        name: "Stage 6 — Output, History, DTOs"
+        needs: stage-5-analysis
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '21'
+                  cache: maven
+            - name: Unit test — output
+              run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.output.**"
+            - name: Flag coverage gap — history
+              run: echo "::warning title=No tests::history package has zero test coverage (RunLogWriterService, RunLogReaderService)"
+            - name: Flag coverage gap — dto
+              run: echo "::warning title=No tests::dto package has zero test coverage (request/response shapes)"
 
-  stage-7-integration:
-    name: "Stage 7 — Facade, API, CORS integration"
-    needs: stage-6-output-persistence
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Full package build
-        run: mvn -B package
-      - name: Integration test — facade + api + CORS
-        run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.facade.**,com.victorkithinji.wrap.wrapca.api.**"
-      - name: Upload jar artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wrapca-jar
-          path: target/*.jar
+    stage-7-integration:
+        name: "Stage 7 — Facade, API, CORS integration"
+        needs: stage-6-output-persistence
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: '21'
+                  cache: maven
+            - name: Full package build
+              run: mvn -B package
+            - name: Integration test — facade + api + CORS
+              run: mvn -B test -Dtest="com.victorkithinji.wrap.wrapca.facade.**,com.victorkithinji.wrap.wrapca.api.**"
+            - name: Upload jar artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: wrapca-jar
+                  path: target/*.jar

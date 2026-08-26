@@ -11,7 +11,9 @@ Base package: com.victorkithinji.wrap.wrapca
 Project name: WrapCa
 ```
 
-See documentation: [Documentation](Wildfire%20Risk%20and%20Progression%20Modelling%20Documentation.pdf)
+> ! See documentation
+> : [Documentation](docs/Wildfire%20Risk%20and%20Progression%20Modelling%20Documentation.pdf) (not opening? look at 
+> /docs)
 
 
 
@@ -21,6 +23,16 @@ See documentation: [Documentation](Wildfire%20Risk%20and%20Progression%20Modelli
 
 WRaP is a two-phase wildfire CA engine exposed as a Spring Boot REST API. A Chromium frontend consumes the API — all
 computation is Java-side.
+
+This is part of the Wildfire Risk and Progression Modelling project with the repositories:
+
+| Name | Stack | Desciption                                                                                                            |
+|------|-------|-----------------------------------------------------------------------------------------------------------------------|
+|Wrap Ca Engine| Java 21, Springboot | (This repo) This is the solution's backend                                                                            |
+| Wrap UI | ReactJS, Vite | [Repository Link] (https://github.com/VictorCodebase/wrap-ui). This offers an interactive Chromium UI for the backend |
+
+
+Wrap CA operates in two phases:
 
 **Phase 1 (pre-fire):** Monte Carlo ensemble of CA runs to produce two output layers — ignition probability map (
 smoothed I(c) index) and damage potential map (burn frequency across N runs).
@@ -34,8 +46,19 @@ evaluated per generation — this is the core efficiency constraint.
 
 ---
 
-### Architecture layers 
 
+_these images have been fetched from the official documentation.
+Click [Documentation](docs/Wildfire%20Risk%20and%20Progression%20Modelling%20Documentation.pdf) to open the full documentation_
+> Overall architecture
+![Screenshot_20260826_155341.png](docs/images/Screenshot_20260826_155341.png)
+
+> WrapCa architecture
+![Screenshot_20260826_155905.png](docs/images/Screenshot_20260826_155905.png)
+
+
+
+### Project
+The project is broken into the following modular sections
 ```
 api/            → HTTP only, no logic
 facade/         → startup orchestration, mode detection
@@ -52,6 +75,20 @@ dto/            → API request/response shapes only
 config/         → reads application.properties into typed beans
 cvintegration/  → HTTP client to CV module, mode detection boundary
 ```
+
+The modules' dependency on each other is listed below, modules listed in a group exist largely independent of 
+each other, however modules lower in the list are largely dependent on those higher in the list. This grouping is what 
+informs this project's CI.
+
+| Group | Packages | Why grouped |
+|-------|----------|--------|
+| 1     | grid, rothermel | Pure Java, zero Spring, fastest, foundational |
+| 2     | config | Spring context must bind before anything else runs |
+| 3     | ingestion, cvintegration | External data boundary, both I/O-heavy |
+| 4     |grid (init), simulation | The CA engine core |
+| 5     | montecarlo, correction | Both consume the engine, independent of each other |
+| 6     | output, history, dto | Pure transformation/serialization, no simulation logic |
+| 7     | 	facade, api | Full wiring — this is where CORS and REST/JSON actually get exercised |
 
 ---
 

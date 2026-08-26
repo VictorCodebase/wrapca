@@ -114,7 +114,7 @@ wrap.data.roads-path=./data/osm/roads.geojson
 
 ### Implementation order
 
-Work through these in sequence. Each group depends on the previous.
+This project is implemented in the sequence below. Each group depends on the previous.
 
 ---
 

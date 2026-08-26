@@ -16,6 +16,30 @@ import java.util.List;
 @Value
 public class SessionStatusResponseDto {
 
+	public SessionStatusResponseDto(SimulationModeEnum mode, int rows, int cols,
+							double cellSizeMetres, double minX, double minY,
+							double maxX, double maxY,
+							List<RunSummaryResponseDto> pastRuns,
+							byte[] fuelRiskValues) {
+		this.mode = mode;
+		this.rows = rows;
+		this.cols = cols;
+		this.cellSizeMetres = cellSizeMetres;
+		this.minX = minX;
+		this.minY = minY;
+		this.maxX = maxX;
+		this.maxY = maxY;
+		this.pastRuns = pastRuns;
+		this.fuelRiskValues = fuelRiskValues;
+	}
+
+	public SessionStatusResponseDto(SimulationModeEnum mode, int rows, int cols,
+							double cellSizeMetres, double minX, double minY,
+							double maxX, double maxY,
+							List<RunSummaryResponseDto> pastRuns) {
+		this(mode, rows, cols, cellSizeMetres, minX, minY, maxX, maxY, pastRuns, new byte[] {});
+	}
+
 	/**
 	 * Current operating mode. Determines which run endpoint is valid.
 	 */

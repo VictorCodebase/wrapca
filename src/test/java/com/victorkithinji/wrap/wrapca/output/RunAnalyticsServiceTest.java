@@ -348,7 +348,7 @@ class RunAnalyticsServiceTest {
 		// --- empty steps: all other Phase 2 fields are null ---
 
 		@Test
-		@DisplayName("empty steps: all Phase 2 fields null except generationsRun")
+		@DisplayName("empty steps: all Phase 2 fields null except duration and generationsRun")
 		void emptySteps_otherFieldsNull() {
 			RunAnalytics r = analyticsService.summarisePhaseTwo(
 				List.of(), GridTestFactory.allUnburned(2, 2), simulationConfig);
@@ -360,7 +360,7 @@ class RunAnalyticsServiceTest {
 			assertThat(r.getPerimeterLengthMetres()).isNull();
 			assertThat(r.getPerimeterCellCountFinal()).isNull();
 			assertThat(r.getNaturalBarrierCellsEncountered()).isNull();
-			assertThat(r.getSimulatedDurationHours()).isNull();
+			assertThat(r.getSimulatedDurationHours()).isZero();
 		}
 
 		// --- finalBurnedAreaHectares ---
@@ -615,8 +615,8 @@ class RunAnalyticsServiceTest {
 	 */
 	private SimulationStepResult stubStepWithIgnitions(int generation, Set<Long> cells) {
 		SimulationStepResult step = mock(SimulationStepResult.class);
-		when(step.getGeneration()).thenReturn(generation);
-		when(step.getNewlyIgnitedCells()).thenReturn(Collections.unmodifiableSet(cells));
+		lenient().when(step.getGeneration()).thenReturn(generation);
+		lenient().when(step.getNewlyIgnitedCells()).thenReturn(Collections.unmodifiableSet(cells));
 		return step;
 	}
 

@@ -12,6 +12,24 @@ import lombok.Value;
 @Value
 public class GridInitResult {
 
+	public GridInitResult(CaGrid grid, float[][] roadProximityMetres, byte[][] fuelRiskCodes) {
+		this.grid = grid;
+		this.roadProximityMetres = roadProximityMetres;
+		this.fuelRiskCodes = fuelRiskCodes;
+	}
+
+	public GridInitResult(CaGrid grid, float[][] roadProximityMetres) {
+		this(grid, roadProximityMetres, createZeroFuelRiskCodes(grid.rows, grid.cols));
+	}
+
+	private static byte[][] createZeroFuelRiskCodes(int rows, int cols) {
+		byte[][] codes = new byte[rows][cols];
+		for (int r = 0; r < rows; r++) {
+			java.util.Arrays.fill(codes[r], (byte) 0);
+		}
+		return codes;
+	}
+
 	/**
 	 * The fully initialised CA grid. Cell states are either
 	 * {@link CellStateEnum#UNBURNED} or {@link CellStateEnum#NON_COMBUSTIBLE}.

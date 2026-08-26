@@ -26,6 +26,44 @@ import lombok.Value;
 @Value
 public class GridBands {
 
+	public GridBands(float[][] ndvi, float[][] ndmi, float[][] fmc,
+					float[][] elevationMetres, float[][] slopeDegrees,
+					float[][] aspectRadians,
+					int rows, int cols, double cellSizeMetres,
+					double minX, double minY, double maxX, double maxY) {
+		this.ndvi = ndvi;
+		this.ndmi = ndmi;
+		this.fmc = fmc;
+		this.elevationMetres = elevationMetres;
+		this.slopeDegrees = slopeDegrees;
+		this.aspectRadians = aspectRadians;
+		this.rows = rows;
+		this.cols = cols;
+		this.cellSizeMetres = cellSizeMetres;
+		this.minX = minX;
+		this.minY = minY;
+		this.maxX = maxX;
+		this.maxY = maxY;
+	}
+
+	public GridBands(float[][] ndvi, float[][] ndmi,
+					float[][] elevationMetres, float[][] slopeDegrees,
+					float[][] aspectRadians,
+					int rows, int cols, double cellSizeMetres,
+					double minX, double minY, double maxX, double maxY) {
+		this(ndvi, ndmi, createDefaultFmc(ndvi), elevationMetres, slopeDegrees, aspectRadians,
+			rows, cols, cellSizeMetres, minX, minY, maxX, maxY);
+	}
+
+	private static float[][] createDefaultFmc(float[][] source) {
+		float[][] fmc = new float[source.length][];
+		for (int r = 0; r < source.length; r++) {
+			fmc[r] = new float[source[r].length];
+			java.util.Arrays.fill(fmc[r], 0.08f);
+		}
+		return fmc;
+	}
+
 	float[][] ndvi;
 	float[][] ndmi;
 

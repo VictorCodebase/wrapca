@@ -22,6 +22,43 @@ import java.util.Map;
 @Value
 public class RunAnalytics {
 
+	public RunAnalytics(Integer highRiskCellCount, Double highRiskAreaHectares,
+					Map<String, Double> highRiskAreaByVegetationType,
+					List<Long> topIgnitionSeeds, List<Double> topIgnitionSeedScores,
+					String dominantVegetationType, Double simulatedHorizonHours,
+					Double finalBurnedAreaHectares,
+					Map<String, Double> burnedAreaByVegetationType,
+					Double peakRosHectaresPerHour, Integer stepAtPeakRos,
+					Double perimeterLengthMetres, Integer perimeterCellCountFinal,
+					Integer naturalBarrierCellsEncountered,
+					Double simulatedDurationHours, Integer generationsRun) {
+		this.highRiskCellCount = highRiskCellCount;
+		this.highRiskAreaHectares = highRiskAreaHectares;
+		this.highRiskAreaByVegetationType = highRiskAreaByVegetationType;
+		this.topIgnitionSeeds = topIgnitionSeeds;
+		this.topIgnitionSeedScores = topIgnitionSeedScores;
+		this.dominantVegetationType = dominantVegetationType;
+		this.simulatedHorizonHours = simulatedHorizonHours;
+		this.finalBurnedAreaHectares = finalBurnedAreaHectares;
+		this.burnedAreaByVegetationType = burnedAreaByVegetationType;
+		this.peakRosHectaresPerHour = peakRosHectaresPerHour;
+		this.stepAtPeakRos = stepAtPeakRos;
+		this.perimeterLengthMetres = perimeterLengthMetres;
+		this.perimeterCellCountFinal = perimeterCellCountFinal;
+		this.naturalBarrierCellsEncountered = naturalBarrierCellsEncountered;
+		this.simulatedDurationHours = simulatedDurationHours;
+		this.generationsRun = generationsRun;
+	}
+
+	public RunAnalytics(Integer highRiskCellCount, Double highRiskAreaHectares,
+					List<Long> topIgnitionSeeds, String dominantVegetationType,
+					Double simulatedHorizonHours, Double finalBurnedAreaHectares,
+					Integer stepAtPeakRos, Integer generationsRun) {
+		this(highRiskCellCount, highRiskAreaHectares, null, topIgnitionSeeds, null,
+			dominantVegetationType, simulatedHorizonHours, finalBurnedAreaHectares,
+			null, null, stepAtPeakRos, null, null, null, null, generationsRun);
+	}
+
 	// =========================================================================
 	// Phase 1 fields  (null on Phase 2 runs)
 	// =========================================================================

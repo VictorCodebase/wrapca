@@ -501,9 +501,11 @@ public class WrapSessionFacade {
 		activeFireGrid = baseGrid.deepCopy();
 		suppressedZoneRegistry.clear();
 
-		log.debug("Phase 2: ignition polygon first coordinate — {}",
-			request.getManualIgnitionPolygonGeoJson().substring(0,
-				Math.min(150, request.getManualIgnitionPolygonGeoJson().length())));
+		if (request.isManualIgnition() && request.getManualIgnitionPolygonGeoJson() != null) {
+			log.debug("Phase 2: ignition polygon first coordinate — {}",
+				request.getManualIgnitionPolygonGeoJson().substring(0,
+					Math.min(150, request.getManualIgnitionPolygonGeoJson().length())));
+		}
 
 		log.debug("Phase 2: grid bounds — minX={}, minY={}, maxX={}, maxY={}",
 			(int) minX, (int) minY, (int) maxX, (int) maxY);

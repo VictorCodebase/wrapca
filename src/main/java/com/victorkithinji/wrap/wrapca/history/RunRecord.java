@@ -18,6 +18,24 @@ import java.util.Map;
 @Value
 public class RunRecord {
 
+	public RunRecord(String runId, SimulationModeEnum phase, Instant startedAt,
+					Instant completedAt, Map<String, Object> parameters,
+					String resultFilePath, RunAnalytics analytics) {
+		this.runId = runId;
+		this.phase = phase;
+		this.startedAt = startedAt;
+		this.completedAt = completedAt;
+		this.parameters = parameters;
+		this.resultFilePath = resultFilePath;
+		this.analytics = analytics;
+	}
+
+	public RunRecord(String runId, SimulationModeEnum phase, Instant startedAt,
+					Instant completedAt, Map<String, Object> parameters,
+					String resultFilePath) {
+		this(runId, phase, startedAt, completedAt, parameters, resultFilePath, null);
+	}
+
 	/**
 	 * Unique run identifier — UUID string, assigned by the facade at run start.
 	 */

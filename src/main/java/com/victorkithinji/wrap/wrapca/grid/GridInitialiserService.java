@@ -93,6 +93,12 @@ public class GridInitialiserService {
 	 * road proximity array, and the fuel risk codes.
 	 */
 	public GridInitResult build(GridBands bands, int[][] esaCodes,
+								RoadLayer roadLayer) {
+		return build(bands, esaCodes, roadLayer,
+			new byte[bands.getRows()][bands.getCols()]);
+	}
+
+	public GridInitResult build(GridBands bands, int[][] esaCodes,
 								RoadLayer roadLayer, byte[][] fuelRiskCodes) {
 
 		int rows = bands.getRows();

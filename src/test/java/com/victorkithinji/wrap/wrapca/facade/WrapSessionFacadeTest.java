@@ -130,7 +130,8 @@ class WrapSessionFacadeTest {
 
 		float[][] roadProx = {{Float.MAX_VALUE, Float.MAX_VALUE},
 			{Float.MAX_VALUE, Float.MAX_VALUE}};
-		gridInitResult = new GridInitResult(grid, roadProx);
+		byte[][] fuelRisk = {{0, 0}, {0, 0}};
+		gridInitResult = new GridInitResult(grid, roadProx, fuelRisk);
 
 		resampledBands = buildResampledBands();
 
@@ -265,7 +266,7 @@ class WrapSessionFacadeTest {
 	// -------------------------------------------------------------------------
 
 	@Test
-	void runPhaseTwo_manualIgnition_seedsCellsFromGeoJson() {
+	void runPhaseTwo_manualIgnition_seedsCellsFromGeoJson() throws Exception {
 		triggerSuccessfulRefresh();
 		stubPhaseTwoPipeline();
 
@@ -287,7 +288,7 @@ class WrapSessionFacadeTest {
 	}
 
 	@Test
-	void runPhaseTwo_cvNotDisabled_fetchesCvPerimeter() {
+	void runPhaseTwo_cvNotDisabled_fetchesCvPerimeter() throws Exception {
 		triggerSuccessfulRefresh();
 		stubPhaseTwoPipeline();
 
@@ -408,7 +409,7 @@ class WrapSessionFacadeTest {
 	@Test
 	void getAllRuns_delegatesToReader() {
 		RunRecord r = new RunRecord("id", SimulationModeEnum.PRE_FIRE,
-			Instant.now(), Instant.now(), Map.of(), null);
+			Instant.now(), Instant.now(), Map.of(), null, null);
 		when(runLogReaderService.readAll()).thenReturn(List.of(r));
 
 		assertThat(facade.getAllRuns()).hasSize(1);
@@ -426,25 +427,25 @@ class WrapSessionFacadeTest {
 
 	private void stubSuccessfulLoad() throws Exception {
 		Path fakePath = Path.of("./data/cv.tif");
-		when(cvApiClient.fetchLatestFuelState()).thenReturn(Optional.of(fakePath));
+		lenient().when(cvApiClient.fetchLatestFuelState()).thenReturn(Optional.of(fakePath));
 
 		GridBands nativeBands = buildNativeBands();
 		EsaBands nativeEsa = buildNativeEsa();
-		when(geoTiffBandReaderService.read(any())).thenReturn(nativeBands);
-		when(geoTiffBandReaderService.readEsa(any())).thenReturn(nativeEsa);
+		lenient().when(geoTiffBandReaderService.read(any())).thenReturn(nativeBands);
+		lenient().when(geoTiffBandReaderService.readEsa(any())).thenReturn(nativeEsa);
 		// readFuelRisk — only called when fuelRiskPath is set; stubbed defensively
 		FuelRiskBands nativeRisk = new FuelRiskBands(
 			new byte[][]{{1, 2}, {2, 3}}, 2, 2, 10.0,
 			300000.0, 9800000.0, 300200.0, 9900000.0);
-		when(geoTiffBandReaderService.readFuelRisk(any())).thenReturn(nativeRisk);
-		when(osmRoadLoaderService.load()).thenReturn(new RoadLayer(Collections.emptyList()));
-		when(rasterResamplerService.resample(any())).thenReturn(resampledBands);
-		when(rasterResamplerService.resampleEsa(any())).thenReturn(new int[][]{{10, 30}, {30, 30}});
-		when(rasterResamplerService.resampleFuelRisk(any()))
+		lenient().when(geoTiffBandReaderService.readFuelRisk(any())).thenReturn(nativeRisk);
+		lenient().when(osmRoadLoaderService.load()).thenReturn(new RoadLayer(Collections.emptyList()));
+		lenient().when(rasterResamplerService.resample(any())).thenReturn(resampledBands);
+		lenient().when(rasterResamplerService.resampleEsa(any())).thenReturn(new int[][]{{10, 30}, {30, 30}});
+		lenient().when(rasterResamplerService.resampleFuelRisk(any()))
 			.thenReturn(new byte[][]{{1, 2}, {2, 3}});
 		// 4-argument build signature (added with fuel risk support)
-		when(gridInitialiserService.build(any(), any(), any(), any())).thenReturn(gridInitResult);
-		when(windFieldLoaderService.load(anyInt(), anyInt())).thenReturn(windField);
+		lenient().when(gridInitialiserService.build(any(), any(), any(), any())).thenReturn(gridInitResult);
+		lenient().when(windFieldLoaderService.load(anyInt(), anyInt())).thenReturn(windField);
 	}
 
 	private void triggerSuccessfulRefresh() {
@@ -473,8 +474,23 @@ class WrapSessionFacadeTest {
 			2, 2);
 		when(riskMapAssembler.assemble(any(), any(), anyInt())).thenReturn(result);
 		// Analytics stub — returns a minimal all-null analytics object
-		RunAnalytics analytics = new RunAnalytics(1, 0.01, List.of(0L), "GRASSLAND",
-			null, null, null, null);
+		RunAnalytics analytics = new RunAnalytics(
+			1,
+			0.01,
+			Map.of("GRASSLAND", 0.01),
+			List.of(0L),
+			List.of(0.01),
+			"GRASSLAND",
+			0.5,
+			0.1,
+			Map.of("GRASSLAND", 0.01),
+			0.2,
+			1,
+			0.3,
+			1,
+			1,
+			0.4,
+			1);
 		when(analyticsService.summarisePhaseOne(any(), any(), any(), anyInt()))
 			.thenReturn(analytics);
 		PhaseOneResultResponseDto dto = new PhaseOneResultResponseDto(
@@ -496,8 +512,23 @@ class WrapSessionFacadeTest {
 		when(simulationConfig.getMonteCarloRuns()).thenReturn(10);
 		when(caSpreadEngine.run(any(), any(), any(), anyInt()))
 			.thenReturn(Collections.emptyList());
-		RunAnalytics analytics = new RunAnalytics(null, null, null, null,
-			0.0, null, 0, 0);
+		RunAnalytics analytics = new RunAnalytics(
+			null,
+			null,
+			null,
+			null,
+			null,
+			null,
+			null,
+			null,
+			null,
+			0.0,
+			null,
+			null,
+			null,
+			null,
+			null,
+			0);
 		when(analyticsService.summarisePhaseTwo(anyList(), any(), any()))
 			.thenReturn(analytics);
 		PhaseTwoResultResponseDto dto = new PhaseTwoResultResponseDto(
@@ -511,13 +542,13 @@ class WrapSessionFacadeTest {
 
 	private GridBands buildNativeBands() {
 		float[][] data = {{0.5f, 0.5f}, {0.5f, 0.5f}};
-		return new GridBands(data, data, data, data, data, 2, 2, 10.0,
+		return new GridBands(data, data, data, data, data, data, 2, 2, 10.0,
 			300000.0, 9800000.0, 300200.0, 9900000.0);
 	}
 
 	private GridBands buildResampledBands() {
 		float[][] data = {{0.5f, 0.5f}, {0.5f, 0.5f}};
-		return new GridBands(data, data, data, data, data, 2, 2, 100.0,
+		return new GridBands(data, data, data, data, data, data, 2, 2, 100.0,
 			300000.0, 9800000.0, 300200.0, 9900000.0);
 	}
 

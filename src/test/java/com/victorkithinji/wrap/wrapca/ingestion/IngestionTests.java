@@ -342,11 +342,10 @@ class IngestionTests {
 		}
 
 		@Test
-		void unsupportedGeoJsonType_throwsIllegalArgument() {
-			String bad = "{\"type\": \"MultiPolygon\", \"coordinates\": []}";
-			assertThatThrownBy(() -> svc.parse(bad, 0, 0, 100.0, 10, 10))
-				.isInstanceOf(IllegalArgumentException.class)
-				.hasMessageContaining("Unsupported GeoJSON type");
+		void multiPolygonGeoJsonIsAccepted() throws IOException {
+			String bad = "{\"type\": \"MultiPolygon\", \"coordinates\": [[[[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0], [0.0, 0.0]]]]}";
+			Set<Long> cells = svc.parse(bad, 0.0, 100.0, 100.0, 10, 10);
+			assertThat(cells).isNotEmpty();
 		}
 	}
 

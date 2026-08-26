@@ -14,12 +14,12 @@ import java.io.File;
 import java.util.Random;
 
 /**
- * Generates a synthetic 11-band GeoTIFF fixture matching the confirmed CV output contract.
+ * Generates a synthetic 12-band GeoTIFF fixture matching the confirmed CV output contract.
  *
  * Band order mirrors the CV contract exactly:
  *   0  Blue, 1 Green, 2 Red, 3 NIR, 4 SWIR,
  *   5  NDVI, 6 NDMI, 7 NDWI,
- *   8  Elevation, 9 Slope, 10 Aspect
+ *   8  FMC, 9 Elevation, 10 Slope, 11 Aspect
  *
  * Resolution: 10m native (matching CV output), producing a 2000x2000 grid
  * for the 20km x 20km Aberdare test area. RasterResamplerService (Group 5)
@@ -29,6 +29,7 @@ import java.util.Random;
  *   NDVI:      0.65 base (forest), SW patch 0.25 (grassland), NE patch 0.01 (water)
  *   NDMI:      correlated with NDVI (ndvi * 0.7 + noise)
  *   NDWI:      low values except NE water patch
+ *   FMC:       0.08–0.18 direct moisture fraction, higher in forest cells
  *   Elevation: 1800m–2200m W→E gradient (Aberdare escarpment)
  *   Slope:     derived from elevation gradient, range 0–15 degrees
  *   Aspect:    uniform westerly (270°) converted to radians — simplified
@@ -50,7 +51,7 @@ public class SyntheticGeoTiffGenerator {
     private static final double ORIGIN_X = 260000.0;
     private static final double ORIGIN_Y = 9862000.0;
 
-    private static final int BANDS = 11;
+    private static final int BANDS = 12;
 
     // Band indices matching BandLayout constants
     private static final int B_BLUE      = 0;
@@ -61,9 +62,10 @@ public class SyntheticGeoTiffGenerator {
     private static final int B_NDVI      = 5;
     private static final int B_NDMI      = 6;
     private static final int B_NDWI      = 7;
-    private static final int B_ELEVATION = 8;
-    private static final int B_SLOPE     = 9;
-    private static final int B_ASPECT    = 10;
+    private static final int B_FMC       = 8;
+    private static final int B_ELEVATION = 9;
+    private static final int B_SLOPE     = 10;
+    private static final int B_ASPECT    = 11;
 
     public static void main(String[] args) throws Exception {
         String outputPath = args.length > 0 ? args[0] : "data/geotiff/latest_cv_output.tif";
@@ -84,6 +86,8 @@ public class SyntheticGeoTiffGenerator {
                 float ndvi      = computeNdvi(row, col, rng);
                 float ndmi      = Math.max(0f, ndvi * 0.7f + (rng.nextFloat() - 0.5f) * 0.05f);
                 float ndwi      = isWaterPatch(row, col) ? 0.4f : -0.2f;
+                float fmc       = 0.08f + ndvi * 0.15f + (rng.nextFloat() - 0.5f) * 0.01f;
+                fmc             = Math.max(0.03f, Math.min(0.40f, fmc));
                 float elevation = 1800f + (col / (float) COLS) * 400f;
                 // Slope derived from the W→E elevation gradient:
                 // rise = 400m over 20000m horizontal = 0.02 rad = ~1.15 degrees
@@ -107,6 +111,7 @@ public class SyntheticGeoTiffGenerator {
                 raster.setSample(col, row, B_NDVI,      ndvi);
                 raster.setSample(col, row, B_NDMI,      ndmi);
                 raster.setSample(col, row, B_NDWI,      ndwi);
+                raster.setSample(col, row, B_FMC,       fmc);
                 raster.setSample(col, row, B_ELEVATION, elevation);
                 raster.setSample(col, row, B_SLOPE,     slope);
                 raster.setSample(col, row, B_ASPECT,    aspect);
